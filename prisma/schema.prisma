@@ -1,0 +1,125 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// Users table (for future OAuth integration)
+model User {
+  id          String   @id @default(uuid()) @db.Uuid
+  email       String   @unique
+  name        String?
+  avatarUrl   String?
+  role        Role     @default(EDITOR)
+  createdAt   DateTime @default(now())
+  lastLoginAt DateTime?
+
+  // Relations
+  createdCampaigns   Campaign[] @relation("CreatedBy")
+  modifiedCampaigns  Campaign[] @relation("ModifiedBy")
+  assignedCampaigns  Campaign[] @relation("AssignedTo")
+  activities         CampaignActivity[]
+  reviewsRequested   CampaignReview[] @relation("RequestedBy")
+  reviewsGiven       CampaignReview[] @relation("ReviewedBy")
+}
+
+enum Role {
+  ADMIN
+  EDITOR
+  VIEWER
+}
+
+// Main Campaign table
+model Campaign {
+  id               String         @id @default(uuid()) @db.Uuid
+  title            String
+  topic            String
+  status           CampaignStatus @default(DRAFT)
+  scheduledDate    DateTime?
+  channels         Json           // {blog: true, email: true, ...}
+  products         Json?          // [{sku, name, price}]
+  contentFocus     Int            @default(3) // 1-5
+  notes            String?
+  generatedContent Json?          // {blog: "...", email: {...}, ...}
+  docUrl           String?
+  folderUrl        String?
+
+  // User tracking
+  createdById      String?  @db.Uuid
+  createdBy        User?    @relation("CreatedBy", fields: [createdById], references: [id])
+  lastModifiedById String?  @db.Uuid
+  lastModifiedBy   User?    @relation("ModifiedBy", fields: [lastModifiedById], references: [id])
+  assignedToId     String?  @db.Uuid
+  assignedTo       User?    @relation("AssignedTo", fields: [assignedToId], references: [id])
+
+  // Timestamps
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // Relations
+  activities       CampaignActivity[]
+  reviews          CampaignReview[]
+}
+
+enum CampaignStatus {
+  DRAFT
+  PENDING_REVIEW
+  APPROVED
+  SCHEDULED
+  PUBLISHED
+  COMPLETED
+  ARCHIVED
+}
+
+// Activity log for audit trail
+model CampaignActivity {
+  id          String         @id @default(uuid()) @db.Uuid
+  campaignId  String         @db.Uuid
+  campaign    Campaign       @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  userId      String?        @db.Uuid
+  user        User?          @relation(fields: [userId], references: [id])
+  userEmail   String         // Store for quick display (even before OAuth)
+  action      ActivityAction
+  details     Json?          // What changed
+  createdAt   DateTime       @default(now())
+}
+
+enum ActivityAction {
+  CREATED
+  EDITED
+  SENT_FOR_REVIEW
+  APPROVED
+  REJECTED
+  CHANGES_REQUESTED
+  SCHEDULED
+  PUBLISHED
+  ARCHIVED
+}
+
+// Reviews for approval workflow
+model CampaignReview {
+  id               String       @id @default(uuid()) @db.Uuid
+  campaignId       String       @db.Uuid
+  campaign         Campaign     @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  requestedById    String?      @db.Uuid
+  requestedBy      User?        @relation("RequestedBy", fields: [requestedById], references: [id])
+  requestedByEmail String
+  reviewerId       String?      @db.Uuid
+  reviewer         User?        @relation("ReviewedBy", fields: [reviewerId], references: [id])
+  reviewerEmail    String?
+  status           ReviewStatus @default(PENDING)
+  comments         String?
+  createdAt        DateTime     @default(now())
+  respondedAt      DateTime?
+}
+
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CHANGES_REQUESTED
+}
