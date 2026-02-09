@@ -2,10 +2,16 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
+import { createClient } from "@supabase/supabase-js"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Waves, Anchor, Mail, Lock, Loader2 } from "lucide-react"
+
+const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)
 
 export function LoginForm() {
     const router = useRouter()
@@ -36,9 +42,19 @@ export function LoginForm() {
 
     const handleGoogleLogin = async () => {
         setIsLoading(true)
-        await new Promise((resolve) => setTimeout(resolve, 800))
-        localStorage.setItem("dd_user", JSON.stringify({ email: "demo@diversdirect.com", name: "Demo User" }))
-        router.push("/")
+        setError("")
+
+        const { error } = await supabase.auth.signInWithOAuth({
+            provider: 'google',
+            options: {
+                redirectTo: `${window.location.origin}/auth/callback`
+            }
+        })
+
+        if (error) {
+            setError(error.message)
+            setIsLoading(false)
+        }
     }
 
     return (
