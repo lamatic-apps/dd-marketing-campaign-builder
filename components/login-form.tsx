@@ -176,10 +176,6 @@ export function LoginForm() {
                         </svg>
                         Continue with Google
                     </Button>
-
-                    <p className="mt-6 text-center text-sm text-slate-400">
-                        Demo: Use any email/password to sign in
-                    </p>
                 </div>
 
                 {/* Footer */}
