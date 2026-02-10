@@ -101,17 +101,25 @@ export function NewCampaignModal({ open, onOpenChange, selectedDate, onCampaignC
           topic: topic,
           scheduledDate: date ? localDateToESTISOString(date) : undefined,
           channels: channelsRecord,
-          products: selectedProducts.filter(p => p.type === 'product').map(p => ({
-            id: p.id,
-            name: p.name,
-            sku: p.sku,
-            price: p.price,
-          })),
-          termSales: selectedProducts.filter(p => p.type === 'term_sale').map(ts => ({
-            term_sale_id: ts.term_sale_id,
-            productCount: ts.productCount,
-            products: ts.products
-          })),
+          products: [
+            // Individual products
+            ...selectedProducts.filter(p => p.type === 'product').map(p => ({
+              id: p.id,
+              name: p.name,
+              sku: p.sku,
+              price: p.price,
+            })),
+            // Products selected from term sales
+            ...selectedProducts.filter(p => p.type === 'term_sale').flatMap(ts =>
+              (ts.selectedProducts || ts.products || []).map(sp => ({
+                id: undefined,
+                name: sp.name,
+                sku: sp.part_code,
+                price: sp.final_price,
+                termSaleId: ts.term_sale_id,
+              }))
+            ),
+          ],
           contentFocus,
           notes: notes || undefined,
           userEmail: localStorage.getItem('user-email') || 'anonymous@diversdirect.com',

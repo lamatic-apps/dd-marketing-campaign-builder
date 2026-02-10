@@ -26,6 +26,9 @@ import {
   Sparkles,
   Pencil,
   Trash2,
+  Tag,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { type Campaign, type CampaignStatus, type Channel, getActiveChannels, statusDisplayMap } from "@/lib/campaign-data"
@@ -69,6 +72,9 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
   // Delete confirmation state
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+
+  // Term sale expand state for detail view
+  const [expandedDetailTermSales, setExpandedDetailTermSales] = useState<Set<string>>(new Set())
 
   const allChannels: { id: Channel; label: string; icon: any }[] = [
     { id: "blog", label: "Blog Post", icon: FileText },
@@ -245,12 +251,22 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
       title: editTitle.trim(),
       channels: channelsRecord,
       notes: editNotes || undefined,
-      products: editProducts.filter(p => p.type === 'product').map(p => ({
-        id: p.id,
-        name: p.name,
-        sku: p.sku,
-        price: p.price,
-      })),
+      products: [
+        ...editProducts.filter(p => p.type === 'product').map(p => ({
+          id: p.id,
+          name: p.name,
+          sku: p.sku || '',
+          price: p.price,
+        })),
+        ...editProducts.filter(p => p.type === 'term_sale').flatMap(ts =>
+          (ts.selectedProducts || ts.products || []).map(sp => ({
+            name: sp.name,
+            sku: sp.part_code || '',
+            price: sp.final_price,
+            termSaleId: ts.term_sale_id,
+          }))
+        ),
+      ],
     })
 
     setEditOpen(false)
@@ -391,33 +407,101 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
         <div className="flex-1 overflow-auto p-6">
           <div className="max-w-4xl mx-auto">
             {/* Featured Products */}
-            {localCampaign.products && localCampaign.products.length > 0 && (
-              <Card className="mb-6">
-                <CardContent className="p-4">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide mb-3">
-                    Featured Products ({localCampaign.products.length})
-                  </p>
-                  <div className="space-y-3">
-                    {localCampaign.products.map((product: any, index: number) => (
-                      <div key={product?.sku || index} className="flex items-center gap-4 p-3 bg-gradient-to-r from-cyan-50/50 to-blue-50/50 rounded-lg border border-cyan-100/50">
-                        <div className="w-12 h-12 bg-white rounded-lg flex items-center justify-center border border-cyan-100 shadow-sm">
-                          <FileText className="w-5 h-5 text-cyan-600" />
+            {localCampaign.products && localCampaign.products.length > 0 && (() => {
+              // Separate individual products from term sale products
+              const individualProducts = localCampaign.products.filter((p: any) => !p.termSaleId)
+              const termSaleGroups: Record<string, any[]> = {}
+              localCampaign.products.filter((p: any) => p.termSaleId).forEach((p: any) => {
+                if (!termSaleGroups[p.termSaleId]) termSaleGroups[p.termSaleId] = []
+                termSaleGroups[p.termSaleId].push(p)
+              })
+              const termSaleIds = Object.keys(termSaleGroups)
+
+              return (
+                <Card className="mb-6">
+                  <CardContent className="p-4">
+                    <p className="text-xs text-muted-foreground uppercase tracking-wide mb-3">
+                      Featured Products ({localCampaign.products.length})
+                    </p>
+                    <div className="space-y-3">
+                      {/* Individual Products */}
+                      {individualProducts.map((product: any, index: number) => (
+                        <div key={product?.sku || index} className="flex items-center gap-4 p-3 bg-gradient-to-r from-cyan-50/50 to-blue-50/50 rounded-lg border border-cyan-100/50">
+                          <div className="w-12 h-12 bg-white rounded-lg flex items-center justify-center border border-cyan-100 shadow-sm">
+                            <FileText className="w-5 h-5 text-cyan-600" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium truncate">{product?.name}</p>
+                            <p className="text-xs text-muted-foreground">SKU: {product?.sku}</p>
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <p className="font-semibold text-primary">
+                              ${product?.price?.toFixed(2) || '0.00'}
+                            </p>
+                          </div>
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium truncate">{product?.name}</p>
-                          <p className="text-xs text-muted-foreground">SKU: {product?.sku}</p>
-                        </div>
-                        <div className="text-right flex-shrink-0">
-                          <p className="font-semibold text-primary">
-                            ${product?.price?.toFixed(2) || '0.00'}
-                          </p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
+                      ))}
+
+                      {/* Term Sale Groups (collapsible) */}
+                      {termSaleIds.map((termSaleId) => {
+                        const tsProducts = termSaleGroups[termSaleId]
+                        const isExpanded = expandedDetailTermSales.has(termSaleId)
+                        return (
+                          <div key={termSaleId} className="rounded-lg border border-amber-200/70 overflow-hidden">
+                            <button
+                              type="button"
+                              onClick={() => setExpandedDetailTermSales(prev => {
+                                const next = new Set(prev)
+                                if (next.has(termSaleId)) next.delete(termSaleId)
+                                else next.add(termSaleId)
+                                return next
+                              })}
+                              className="w-full flex items-center gap-3 p-3 bg-gradient-to-r from-amber-50/80 to-yellow-50/50 hover:from-amber-100/80 hover:to-yellow-50/80 transition-colors text-left"
+                            >
+                              {isExpanded ? (
+                                <ChevronDown className="w-4 h-4 text-amber-600 shrink-0" />
+                              ) : (
+                                <ChevronRight className="w-4 h-4 text-amber-600 shrink-0" />
+                              )}
+                              <div className="w-10 h-10 bg-amber-100 rounded-lg flex items-center justify-center border border-amber-200 shadow-sm">
+                                <Tag className="w-5 h-5 text-amber-600" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="font-medium truncate text-amber-800">{termSaleId}</p>
+                                <p className="text-xs text-amber-600/70">{tsProducts.length} products selected</p>
+                              </div>
+                              <Badge variant="outline" className="bg-amber-100 text-amber-700 border-amber-300 shrink-0">
+                                Sale
+                              </Badge>
+                            </button>
+                            {isExpanded && (
+                              <div className="border-t border-amber-200/50">
+                                {tsProducts.map((product: any, index: number) => (
+                                  <div key={product?.sku || index} className="flex items-center gap-4 p-3 bg-amber-50/30 border-b border-amber-100/50 last:border-b-0">
+                                    <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center border border-amber-100 shadow-sm ml-7">
+                                      <FileText className="w-4 h-4 text-amber-500" />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <p className="font-medium truncate text-sm">{product?.name}</p>
+                                      <p className="text-xs text-muted-foreground">SKU: {product?.sku}</p>
+                                    </div>
+                                    <div className="text-right flex-shrink-0">
+                                      <p className="font-semibold text-amber-700">
+                                        ${product?.price?.toFixed(2) || '0.00'}
+                                      </p>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </CardContent>
+                </Card>
+              )
+            })()}
 
             {/* Content Focus */}
             <Card className="mb-6 overflow-hidden">

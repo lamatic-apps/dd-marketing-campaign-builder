@@ -5,7 +5,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Check, ChevronsUpDown, X, Package, Search, Loader2, Tag, ChevronDown, ChevronRight } from "lucide-react"
+import { Check, ChevronsUpDown, X, Package, Search, Loader2, Tag, ChevronDown, ChevronRight, Minus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useProductSearch, type Product, type TermSale, type TermSaleProduct } from "@/hooks/use-product-search"
 import { useDebounce } from "@/hooks/use-debounce"
@@ -22,6 +22,8 @@ export interface SelectedItem {
     term_sale_id?: string
     productCount?: number
     products?: TermSaleProduct[]
+    // Track which products are selected within a term sale (partial selection)
+    selectedProducts?: TermSaleProduct[]
 }
 
 interface ProductSelectorProps {
@@ -86,20 +88,83 @@ export function ProductSelector({
         [selectedProducts, onSelectionChange, maxSelections]
     )
 
+    // Toggle ALL products in a term sale (select all / deselect all)
     const handleSelectTermSale = useCallback(
         (termSale: TermSale) => {
-            const item: SelectedItem = {
-                type: 'term_sale',
-                term_sale_id: termSale.term_sale_id,
-                name: termSale.term_sale_id,
-                productCount: termSale.products.length,
-                products: termSale.products
-            }
-            const isSelected = selectedProducts.some((p) => p.type === 'term_sale' && p.term_sale_id === termSale.term_sale_id)
+            const existing = selectedProducts.find(
+                (p) => p.type === 'term_sale' && p.term_sale_id === termSale.term_sale_id
+            )
 
-            if (isSelected) {
-                onSelectionChange(selectedProducts.filter((p) => !(p.type === 'term_sale' && p.term_sale_id === termSale.term_sale_id)))
+            if (existing) {
+                // Already selected — remove entirely
+                onSelectionChange(selectedProducts.filter(
+                    (p) => !(p.type === 'term_sale' && p.term_sale_id === termSale.term_sale_id)
+                ))
             } else if (selectedProducts.length < maxSelections) {
+                // Select with ALL products
+                const item: SelectedItem = {
+                    type: 'term_sale',
+                    term_sale_id: termSale.term_sale_id,
+                    name: termSale.term_sale_id,
+                    productCount: termSale.products.length,
+                    products: termSale.products,
+                    selectedProducts: [...termSale.products]
+                }
+                onSelectionChange([...selectedProducts, item])
+            }
+        },
+        [selectedProducts, onSelectionChange, maxSelections]
+    )
+
+    // Toggle a single product within a term sale
+    const handleToggleTermSaleProduct = useCallback(
+        (termSale: TermSale, product: TermSaleProduct) => {
+            const existingIdx = selectedProducts.findIndex(
+                (p) => p.type === 'term_sale' && p.term_sale_id === termSale.term_sale_id
+            )
+
+            if (existingIdx >= 0) {
+                // Term sale already in selection — toggle this product within it
+                const existing = selectedProducts[existingIdx]
+                const currentSelected = existing.selectedProducts || []
+                const isProductSelected = currentSelected.some(p => p.part_code === product.part_code)
+
+                if (isProductSelected) {
+                    // Remove this product
+                    const newSelected = currentSelected.filter(p => p.part_code !== product.part_code)
+                    if (newSelected.length === 0) {
+                        // No products left — remove the entire term sale
+                        onSelectionChange(selectedProducts.filter((_, i) => i !== existingIdx))
+                    } else {
+                        const updated = [...selectedProducts]
+                        updated[existingIdx] = {
+                            ...existing,
+                            selectedProducts: newSelected,
+                            productCount: newSelected.length
+                        }
+                        onSelectionChange(updated)
+                    }
+                } else {
+                    // Add this product
+                    const updated = [...selectedProducts]
+                    const newSelected = [...currentSelected, product]
+                    updated[existingIdx] = {
+                        ...existing,
+                        selectedProducts: newSelected,
+                        productCount: newSelected.length
+                    }
+                    onSelectionChange(updated)
+                }
+            } else if (selectedProducts.length < maxSelections) {
+                // Term sale not yet selected — create it with just this product
+                const item: SelectedItem = {
+                    type: 'term_sale',
+                    term_sale_id: termSale.term_sale_id,
+                    name: termSale.term_sale_id,
+                    productCount: 1,
+                    products: termSale.products,
+                    selectedProducts: [product]
+                }
                 onSelectionChange([...selectedProducts, item])
             }
         },
@@ -116,6 +181,26 @@ export function ProductSelector({
         },
         [selectedProducts, onSelectionChange]
     )
+
+    // Helper: get the selection state for a term sale
+    const getTermSaleSelectionState = (termSaleId: string, totalProducts: number) => {
+        const existing = selectedProducts.find(
+            (p) => p.type === 'term_sale' && p.term_sale_id === termSaleId
+        )
+        if (!existing) return 'none'
+        const selectedCount = existing.selectedProducts?.length || 0
+        if (selectedCount >= totalProducts) return 'all'
+        return 'partial'
+    }
+
+    // Helper: check if a specific product in a term sale is selected
+    const isTermSaleProductSelected = (termSaleId: string, partCode: string) => {
+        const existing = selectedProducts.find(
+            (p) => p.type === 'term_sale' && p.term_sale_id === termSaleId
+        )
+        if (!existing) return false
+        return existing.selectedProducts?.some(p => p.part_code === partCode) || false
+    }
 
     const totalResults = products.length + term_sales.length
     const hasResults = totalResults > 0
@@ -175,11 +260,13 @@ export function ProductSelector({
                                             </span>
                                         }>
                                             {term_sales.map((termSale) => {
-                                                const isSelected = selectedProducts.some(
+                                                const selectionState = getTermSaleSelectionState(termSale.term_sale_id, termSale.products.length)
+                                                const isExpanded = expandedTermSales.has(termSale.term_sale_id)
+                                                const isMaxReached = selectedProducts.length >= maxSelections && selectionState === 'none'
+                                                const existing = selectedProducts.find(
                                                     (p) => p.type === 'term_sale' && p.term_sale_id === termSale.term_sale_id
                                                 )
-                                                const isExpanded = expandedTermSales.has(termSale.term_sale_id)
-                                                const isMaxReached = selectedProducts.length >= maxSelections && !isSelected
+                                                const selectedCount = existing?.selectedProducts?.length || 0
 
                                                 return (
                                                     <div key={termSale.term_sale_id}>
@@ -195,12 +282,15 @@ export function ProductSelector({
                                                             <div
                                                                 className={cn(
                                                                     "flex items-center justify-center w-4 h-4 border rounded",
-                                                                    isSelected
+                                                                    selectionState === 'all'
                                                                         ? "bg-amber-500 border-amber-500 text-white"
-                                                                        : "border-amber-400/50"
+                                                                        : selectionState === 'partial'
+                                                                            ? "bg-amber-300 border-amber-500 text-white"
+                                                                            : "border-amber-400/50"
                                                                 )}
                                                             >
-                                                                {isSelected && <Check className="w-3 h-3" />}
+                                                                {selectionState === 'all' && <Check className="w-3 h-3" />}
+                                                                {selectionState === 'partial' && <Minus className="w-3 h-3" />}
                                                             </div>
                                                             <button
                                                                 type="button"
@@ -220,33 +310,64 @@ export function ProductSelector({
                                                             <div className="flex-1 min-w-0">
                                                                 <p className="text-sm font-medium truncate">{termSale.term_sale_id}</p>
                                                                 <p className="text-xs text-muted-foreground">
-                                                                    {termSale.products.length} products on sale
+                                                                    {selectionState !== 'none'
+                                                                        ? `${selectedCount}/${termSale.products.length} products selected`
+                                                                        : `${termSale.products.length} products on sale`
+                                                                    }
                                                                 </p>
                                                             </div>
                                                             <Badge variant="outline" className="bg-amber-100 text-amber-700 border-amber-300">
                                                                 Sale
                                                             </Badge>
                                                         </CommandItem>
-                                                        {/* Expandable product list */}
+                                                        {/* Expandable product list with checkboxes */}
                                                         {isExpanded && (
-                                                            <div className="pl-12 py-1 bg-amber-50/30 dark:bg-amber-950/10 border-l-2 border-amber-200 ml-2">
-                                                                {termSale.products.slice(0, 5).map((product) => (
-                                                                    <div key={product.part_code} className="text-xs py-1 px-2 text-muted-foreground">
-                                                                        <span className="font-medium">{product.name}</span>
-                                                                        <span className="mx-2">•</span>
-                                                                        <span className="text-amber-600">${product.final_price?.toFixed(2)}</span>
-                                                                        {product.original_price > product.final_price && (
-                                                                            <span className="ml-1 line-through text-muted-foreground/50">
-                                                                                ${product.original_price?.toFixed(2)}
+                                                            <div className="pl-8 py-1 bg-amber-50/30 dark:bg-amber-950/10 border-l-2 border-amber-200 ml-2">
+                                                                {/* Select All / Deselect All toggle */}
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation()
+                                                                        handleSelectTermSale(termSale)
+                                                                    }}
+                                                                    className="text-xs font-medium text-amber-600 hover:text-amber-700 px-2 py-1 hover:bg-amber-100/50 rounded w-full text-left"
+                                                                >
+                                                                    {selectionState === 'all' ? 'Deselect All' : 'Select All'}
+                                                                </button>
+                                                                {termSale.products.map((product) => {
+                                                                    const isChecked = isTermSaleProductSelected(termSale.term_sale_id, product.part_code)
+                                                                    return (
+                                                                        <button
+                                                                            key={product.part_code}
+                                                                            type="button"
+                                                                            onClick={(e) => {
+                                                                                e.stopPropagation()
+                                                                                handleToggleTermSaleProduct(termSale, product)
+                                                                            }}
+                                                                            className="flex items-center gap-2 text-xs py-1.5 px-2 w-full text-left hover:bg-amber-100/50 rounded transition-colors"
+                                                                        >
+                                                                            <div
+                                                                                className={cn(
+                                                                                    "flex items-center justify-center w-3.5 h-3.5 border rounded shrink-0",
+                                                                                    isChecked
+                                                                                        ? "bg-amber-500 border-amber-500 text-white"
+                                                                                        : "border-amber-400/40"
+                                                                                )}
+                                                                            >
+                                                                                {isChecked && <Check className="w-2.5 h-2.5" />}
+                                                                            </div>
+                                                                            <span className={cn("font-medium truncate flex-1", isChecked && "text-amber-700")}>
+                                                                                {product.name}
                                                                             </span>
-                                                                        )}
-                                                                    </div>
-                                                                ))}
-                                                                {termSale.products.length > 5 && (
-                                                                    <div className="text-xs py-1 px-2 text-amber-600 font-medium">
-                                                                        +{termSale.products.length - 5} more products...
-                                                                    </div>
-                                                                )}
+                                                                            <span className="text-amber-600 shrink-0">${product.final_price?.toFixed(2)}</span>
+                                                                            {product.original_price > product.final_price && (
+                                                                                <span className="ml-1 line-through text-muted-foreground/50 shrink-0">
+                                                                                    ${product.original_price?.toFixed(2)}
+                                                                                </span>
+                                                                            )}
+                                                                        </button>
+                                                                    )
+                                                                })}
                                                             </div>
                                                         )}
                                                     </div>
@@ -333,7 +454,7 @@ export function ProductSelector({
                             )}
                             <span className="max-w-[150px] truncate text-xs">
                                 {item.type === 'term_sale'
-                                    ? `${item.term_sale_id} (${item.productCount} items)`
+                                    ? `${item.term_sale_id} (${item.selectedProducts?.length || 0}/${item.products?.length || 0})`
                                     : item.name
                                 }
                             </span>

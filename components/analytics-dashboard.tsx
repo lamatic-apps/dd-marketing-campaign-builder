@@ -11,10 +11,15 @@ import {
     MessageSquare,
     Eye,
     RefreshCcw,
-    AlertCircle
+    AlertCircle,
+    CalendarIcon,
+    X
 } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Calendar } from "@/components/ui/calendar"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { format } from "date-fns"
 
 // Types for API Response
 interface KPIData {
@@ -94,11 +99,11 @@ interface DetailData {
 
 function MetricBox({ label, value, color = "text-foreground" }: { label: string, value: string | number, color?: string }) {
     return (
-        <div className="text-center p-4 bg-muted rounded-lg border border-border/50">
-            <p className={`text-2xl font-bold ${color}`}>
-                {typeof value === 'number' ? value.toLocaleString() : value}
+        <div className="text-center p-4 bg-muted rounded-lg border border-border/50 min-w-0 overflow-hidden">
+            <p className={`text-xl font-bold ${color} truncate`}>
+                {typeof value === 'number' ? value.toLocaleString(undefined, { maximumFractionDigits: 2 }) : value}
             </p>
-            <p className="text-sm text-muted-foreground">{label}</p>
+            <p className="text-sm text-muted-foreground truncate">{label}</p>
         </div>
     )
 }
@@ -149,24 +154,28 @@ function CampaignDetailDialog({
         // Mailchimp Metrics
         if (platform === 'mailchimp') {
             return (
-                <div className="space-y-6">
-                    {/* Primary Metrics */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="space-y-4">
+                    {/* Primary KPIs - 2 cols */}
+                    <div className="grid grid-cols-2 gap-3">
                         <MetricBox label="Emails Sent" value={data.metrics.sent?.toLocaleString() || 0} />
                         <MetricBox label="Opens" value={data.metrics.opens?.toLocaleString() || 0} />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
                         <MetricBox label="Clicks" value={data.metrics.clicks?.toLocaleString() || 0} />
                         <MetricBox label="Open Rate" value={`${data.metrics.openRate}%`} color="text-green-600" />
                     </div>
-                    {/* Revenue & Engagement */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {/* Revenue highlight */}
+                    <div className="grid grid-cols-2 gap-3">
                         <div className="text-center p-4 bg-gradient-to-br from-green-500/10 to-emerald-500/5 rounded-lg border border-green-200/50">
-                            <p className="text-2xl font-bold text-green-600">${(data.metrics.revenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                            <p className="text-2xl font-bold text-green-600">${(data.metrics.revenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                             <p className="text-sm text-muted-foreground">Revenue</p>
                         </div>
                         <div className="text-center p-4 bg-gradient-to-br from-blue-500/10 to-cyan-500/5 rounded-lg border border-blue-200/50">
                             <p className="text-2xl font-bold text-blue-600">{data.metrics.orders || 0}</p>
                             <p className="text-sm text-muted-foreground">Orders</p>
                         </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
                         <MetricBox label="Click Rate" value={`${data.metrics.clickRate}%`} color="text-blue-600" />
                         <MetricBox label="Unsubs" value={data.metrics.unsubscribes || 0} />
                     </div>
@@ -177,27 +186,29 @@ function CampaignDetailDialog({
         // Facebook Metrics
         if (platform === 'facebook') {
             return (
-                <div className="space-y-6">
-                    {/* Spend & Revenue Row */}
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="text-center p-5 bg-gradient-to-br from-red-500/10 to-orange-500/5 rounded-xl border border-red-200/50">
-                            <p className="text-3xl font-bold text-red-600">${parseFloat(data.metrics.spend || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                <div className="space-y-4">
+                    {/* Spend & Revenue - stacked */}
+                    <div className="grid grid-cols-2 gap-3">
+                        <div className="text-center p-4 bg-gradient-to-br from-red-500/10 to-orange-500/5 rounded-xl border border-red-200/50">
+                            <p className="text-2xl font-bold text-red-600">${parseFloat(data.metrics.spend || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                             <p className="text-sm text-muted-foreground mt-1">Ad Spend</p>
                         </div>
-                        <div className="text-center p-5 bg-gradient-to-br from-green-500/10 to-emerald-500/5 rounded-xl border border-green-200/50">
-                            <p className="text-3xl font-bold text-green-600">${parseFloat(data.metrics.revenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                        <div className="text-center p-4 bg-gradient-to-br from-green-500/10 to-emerald-500/5 rounded-xl border border-green-200/50">
+                            <p className="text-2xl font-bold text-green-600">${parseFloat(data.metrics.revenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                             <p className="text-sm text-muted-foreground mt-1">Revenue</p>
                         </div>
                     </div>
                     {/* ROAS Highlight */}
                     <div className="text-center p-4 bg-gradient-to-r from-purple-500/10 via-violet-500/10 to-purple-500/10 rounded-xl border border-purple-200/50">
-                        <p className="text-4xl font-bold text-purple-600">{data.metrics.roas || '0.00'}x</p>
+                        <p className="text-3xl font-bold text-purple-600">{parseFloat(data.metrics.roas || 0).toFixed(2)}x</p>
                         <p className="text-sm text-muted-foreground mt-1">Return on Ad Spend (ROAS)</p>
                     </div>
-                    {/* Other Metrics */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {/* Other Metrics - 2 per row */}
+                    <div className="grid grid-cols-2 gap-3">
                         <MetricBox label="Impressions" value={parseInt(data.metrics.impressions || 0).toLocaleString()} />
                         <MetricBox label="Reach" value={parseInt(data.metrics.reach || 0).toLocaleString()} />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
                         <MetricBox label="Clicks" value={parseInt(data.metrics.clicks || 0).toLocaleString()} />
                         <MetricBox label="CTR" value={`${parseFloat(data.metrics.ctr || 0).toFixed(2)}%`} color="text-purple-600" />
                     </div>
@@ -207,25 +218,27 @@ function CampaignDetailDialog({
 
         // Google Ads Metrics
         return (
-            <div className="space-y-6">
-                {/* Spend & Conversions Row */}
-                <div className="grid grid-cols-2 gap-4">
-                    <div className="text-center p-5 bg-gradient-to-br from-blue-500/10 to-cyan-500/5 rounded-xl border border-blue-200/50">
-                        <p className="text-3xl font-bold text-blue-600">${parseFloat(data.metrics.spend || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+            <div className="space-y-4">
+                {/* Spend & Conversions - stacked */}
+                <div className="grid grid-cols-2 gap-3">
+                    <div className="text-center p-4 bg-gradient-to-br from-blue-500/10 to-cyan-500/5 rounded-xl border border-blue-200/50">
+                        <p className="text-2xl font-bold text-blue-600">${parseFloat(data.metrics.spend || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                         <p className="text-sm text-muted-foreground mt-1">Ad Spend</p>
                     </div>
-                    <div className="text-center p-5 bg-gradient-to-br from-green-500/10 to-emerald-500/5 rounded-xl border border-green-200/50">
-                        <p className="text-3xl font-bold text-green-600">{Number(data.metrics.conversions || 0).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}</p>
+                    <div className="text-center p-4 bg-gradient-to-br from-green-500/10 to-emerald-500/5 rounded-xl border border-green-200/50">
+                        <p className="text-2xl font-bold text-green-600">{Number(data.metrics.conversions || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}</p>
                         <p className="text-sm text-muted-foreground mt-1">Conversions</p>
-                        <p className="text-xs text-muted-foreground">${parseFloat(data.metrics.conversionValue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })} value</p>
+                        <p className="text-xs text-muted-foreground">${parseFloat(data.metrics.conversionValue || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} value</p>
                     </div>
                 </div>
-                {/* Performance Metrics */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {/* Performance Metrics - 2 per row */}
+                <div className="grid grid-cols-2 gap-3">
                     <MetricBox label="Impressions" value={parseInt(data.metrics.impressions || 0).toLocaleString()} />
                     <MetricBox label="Clicks" value={parseInt(data.metrics.clicks || 0).toLocaleString()} />
-                    <MetricBox label="CTR" value={`${data.metrics.ctr || 0}%`} color="text-blue-600" />
-                    <MetricBox label="CPC" value={`$${data.metrics.cpc || '0.00'}`} color="text-orange-600" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                    <MetricBox label="CTR" value={`${parseFloat(data.metrics.ctr || 0).toFixed(2)}%`} color="text-blue-600" />
+                    <MetricBox label="CPC" value={`$${parseFloat(data.metrics.cpc || 0).toFixed(2)}`} color="text-orange-600" />
                 </div>
             </div>
         )
@@ -375,20 +388,54 @@ export function AnalyticsDashboard() {
     const [selectedId, setSelectedId] = useState<string | null>(null)
     const [selectedPlatform, setSelectedPlatform] = useState<'mailchimp' | 'facebook' | 'googleads'>('mailchimp')
 
+    // Date Filter State
+    const [startDate, setStartDate] = useState<Date | undefined>(undefined)
+    const [endDate, setEndDate] = useState<Date | undefined>(undefined)
+    const [activeTab, setActiveTab] = useState<string>("email")
+    const [isFiltered, setIsFiltered] = useState(false)
+
     const openDetail = (id: string, platform: 'mailchimp' | 'facebook' | 'googleads') => {
         setSelectedId(id)
         setSelectedPlatform(platform)
         setDetailOpen(true)
     }
 
-    const fetchData = async () => {
+    // Map tab values to platform API values
+    const tabToPlatform: Record<string, string> = {
+        email: 'mailchimp',
+        facebook: 'facebook',
+        google: 'googleads'
+    }
+
+    // Fetch a single platform's KPI data for a date range
+    const fetchPlatformData = async (platform: string, start: Date, end: Date) => {
+        const params = new URLSearchParams({
+            platform,
+            startDate: format(start, 'yyyy-MM-dd'),
+            endDate: format(end, 'yyyy-MM-dd')
+        })
+        const res = await fetch(`/api/kpi?${params.toString()}`)
+        if (!res.ok) throw new Error(`Failed to fetch ${platform} data`)
+        return res.json()
+    }
+
+    // Fetch all platforms in parallel for the given date range
+    const fetchAllPlatforms = async (start: Date, end: Date) => {
         setLoading(true)
         setError(null)
         try {
-            const res = await fetch('/api/kpi')
-            if (!res.ok) throw new Error('Failed to fetch data')
-            const json = await res.json()
-            setData(json)
+            const [mailchimpData, facebookData, googleAdsData] = await Promise.all([
+                fetchPlatformData('mailchimp', start, end),
+                fetchPlatformData('facebook', start, end),
+                fetchPlatformData('googleads', start, end)
+            ])
+
+            setData({
+                ...mailchimpData,
+                ...facebookData,
+                ...googleAdsData,
+                fetchedAt: new Date().toISOString()
+            })
         } catch (err) {
             console.error(err)
             setError('Failed to load KPI data. Please try again.')
@@ -397,8 +444,58 @@ export function AnalyticsDashboard() {
         }
     }
 
+    // Fetch a single platform for the current date range (used by Apply Filter)
+    const fetchSinglePlatform = async (platform: string, start: Date, end: Date) => {
+        setLoading(true)
+        setError(null)
+        try {
+            const json = await fetchPlatformData(platform, start, end)
+            setData((prev: any) => ({
+                ...prev,
+                ...json,
+                fetchedAt: json.fetchedAt || new Date().toISOString()
+            }))
+            setIsFiltered(true)
+        } catch (err) {
+            console.error(err)
+            setError('Failed to load KPI data. Please try again.')
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    const applyDateFilter = () => {
+        if (!startDate || !endDate) return
+        const platform = tabToPlatform[activeTab]
+        if (!platform) return
+        fetchSinglePlatform(platform, startDate, endDate)
+    }
+
+    const clearDateFilter = () => {
+        // Reset to default 30-day range
+        const now = new Date()
+        const thirtyDaysAgo = new Date()
+        thirtyDaysAgo.setDate(now.getDate() - 30)
+        setStartDate(thirtyDaysAgo)
+        setEndDate(now)
+        setIsFiltered(false)
+        fetchAllPlatforms(thirtyDaysAgo, now)
+    }
+
+    const refreshData = () => {
+        if (startDate && endDate) {
+            fetchAllPlatforms(startDate, endDate)
+        }
+    }
+
     useEffect(() => {
-        fetchData()
+        // Default: last 30 days
+        const now = new Date()
+        const thirtyDaysAgo = new Date()
+        thirtyDaysAgo.setDate(now.getDate() - 30)
+        setStartDate(thirtyDaysAgo)
+        setEndDate(now)
+        fetchAllPlatforms(thirtyDaysAgo, now)
     }, [])
 
     if (loading) {
@@ -420,7 +517,7 @@ export function AnalyticsDashboard() {
                     <p className="text-lg font-semibold text-foreground">{error}</p>
                     <p className="text-muted-foreground">Check your connection and try again.</p>
                 </div>
-                <Button onClick={fetchData} className="px-8">Retry Sync</Button>
+                <Button onClick={() => refreshData()} className="px-8">Retry Sync</Button>
             </div>
         )
     }
@@ -454,15 +551,80 @@ export function AnalyticsDashboard() {
                             Google Ads
                         </div>
                     </div>
-                    <Button variant="outline" size="sm" onClick={fetchData} className="gap-2 shadow-sm hover:shadow active:scale-95 transition-all">
+                    <Button variant="outline" size="sm" onClick={() => refreshData()} className="gap-2 shadow-sm hover:shadow active:scale-95 transition-all">
                         <RefreshCcw className="h-4 w-4" />
                         Refresh Data
                     </Button>
                 </div>
             </div>
 
+            {/* Date Range Filter */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 p-4 bg-muted/30 rounded-xl border border-border/40">
+                <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                    <CalendarIcon className="h-4 w-4" />
+                    Filter by Date:
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                    <Popover>
+                        <PopoverTrigger asChild>
+                            <Button variant="outline" size="sm" className={`gap-2 min-w-[140px] justify-start font-normal ${!startDate && 'text-muted-foreground'}`}>
+                                <CalendarIcon className="h-3.5 w-3.5" />
+                                {startDate ? format(startDate, 'MMM dd, yyyy') : 'Start date'}
+                            </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="start">
+                            <Calendar
+                                mode="single"
+                                selected={startDate}
+                                onSelect={setStartDate}
+                                disabled={(date) => endDate ? date > endDate : false}
+                                initialFocus
+                            />
+                        </PopoverContent>
+                    </Popover>
+                    <span className="text-muted-foreground text-sm">to</span>
+                    <Popover>
+                        <PopoverTrigger asChild>
+                            <Button variant="outline" size="sm" className={`gap-2 min-w-[140px] justify-start font-normal ${!endDate && 'text-muted-foreground'}`}>
+                                <CalendarIcon className="h-3.5 w-3.5" />
+                                {endDate ? format(endDate, 'MMM dd, yyyy') : 'End date'}
+                            </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="start">
+                            <Calendar
+                                mode="single"
+                                selected={endDate}
+                                onSelect={setEndDate}
+                                disabled={(date) => startDate ? date < startDate : false}
+                                initialFocus
+                            />
+                        </PopoverContent>
+                    </Popover>
+                    <Button
+                        size="sm"
+                        onClick={applyDateFilter}
+                        disabled={!startDate || !endDate || loading}
+                        className="gap-2 bg-primary hover:bg-primary/90"
+                    >
+                        {loading ? <RefreshCcw className="h-3.5 w-3.5 animate-spin" /> : <CalendarIcon className="h-3.5 w-3.5" />}
+                        Apply Filter
+                    </Button>
+                    {isFiltered && (
+                        <Button variant="ghost" size="sm" onClick={clearDateFilter} className="gap-1 text-muted-foreground hover:text-foreground">
+                            <X className="h-3.5 w-3.5" />
+                            Clear
+                        </Button>
+                    )}
+                </div>
+                {isFiltered && (
+                    <Badge variant="secondary" className="ml-auto text-xs">
+                        Filtered: {activeTab === 'email' ? 'Mailchimp' : activeTab === 'facebook' ? 'Facebook' : activeTab === 'google' ? 'Google Ads' : activeTab}
+                    </Badge>
+                )}
+            </div>
+
             {/* Main Tabs */}
-            <Tabs defaultValue="email" className="space-y-8">
+            <Tabs defaultValue="email" className="space-y-8" onValueChange={setActiveTab}>
                 <div className="sticky top-0 z-10 bg-background/95 backdrop-blur py-2">
                     <TabsList className="bg-muted/30 border border-border/50 p-1 h-12 w-full md:w-auto inline-flex rounded-xl">
                         <TabsTrigger value="email" className="gap-2 px-6 h-10 rounded-lg data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-sm transition-all focus-visible:ring-0">
@@ -489,7 +651,7 @@ export function AnalyticsDashboard() {
                     {/* Revenue Highlight */}
                     <div className="grid gap-4 md:grid-cols-2">
                         <div className="p-6 bg-gradient-to-br from-green-500/10 to-emerald-500/5 rounded-xl border border-green-200/50">
-                            <p className="text-sm text-muted-foreground mb-1">Email Revenue (30d)</p>
+                            <p className="text-sm text-muted-foreground mb-1">Email Revenue</p>
                             <p className="text-3xl font-bold text-green-600">${(data?.email.summary.totalRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
                             <p className="text-xs text-muted-foreground mt-2">{data?.email.summary.totalOrders || 0} orders</p>
                         </div>
@@ -623,7 +785,7 @@ export function AnalyticsDashboard() {
                                 </div>
                                 <div className="p-6 bg-gradient-to-br from-green-500/10 to-emerald-500/5 rounded-xl border border-green-200/50">
                                     <p className="text-sm text-muted-foreground mb-1">Conversions</p>
-                                    <p className="text-3xl font-bold text-green-600">{data?.googleAds.summary.totalConversions || 0}</p>
+                                    <p className="text-3xl font-bold text-green-600">{Number(data?.googleAds.summary.totalConversions || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}</p>
                                     <p className="text-xs text-muted-foreground mt-2">${data?.googleAds.summary.totalConversionValue?.toLocaleString(undefined, { minimumFractionDigits: 2 }) || '0.00'} value</p>
                                 </div>
                                 <div className="p-6 bg-gradient-to-br from-orange-500/10 to-amber-500/5 rounded-xl border border-orange-200/50">
@@ -667,9 +829,9 @@ export function AnalyticsDashboard() {
                                                                 <span className="text-xs font-semibold text-green-600 uppercase tracking-wider">Active Campaigns</span>
                                                             </div>
                                                             <div className="space-y-1">
-                                                                {data.googleAds.campaigns.filter(c => c.status === 'ENABLED').map((c) => (
+                                                                {data.googleAds.campaigns.filter(c => c.status === 'ENABLED').map((c, idx) => (
                                                                     <button
-                                                                        key={c.id}
+                                                                        key={`${c.id}_${idx}`}
                                                                         onClick={() => openDetail(c.id, 'googleads')}
                                                                         className="group w-full flex items-center justify-between p-3 hover:bg-green-500/5 rounded-lg transition-all duration-200 text-left border border-transparent hover:border-green-200/50"
                                                                     >
@@ -703,9 +865,9 @@ export function AnalyticsDashboard() {
                                                                 <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Paused Campaigns</span>
                                                             </div>
                                                             <div className="space-y-1">
-                                                                {data.googleAds.campaigns.filter(c => c.status !== 'ENABLED').map((c) => (
+                                                                {data.googleAds.campaigns.filter(c => c.status !== 'ENABLED').map((c, idx) => (
                                                                     <button
-                                                                        key={c.id}
+                                                                        key={`${c.id}_${idx}`}
                                                                         onClick={() => openDetail(c.id, 'googleads')}
                                                                         className="group w-full flex items-center justify-between p-3 hover:bg-muted/30 rounded-lg transition-all duration-200 text-left border border-transparent hover:border-border/30 opacity-70 hover:opacity-100"
                                                                     >
@@ -744,7 +906,7 @@ export function AnalyticsDashboard() {
                                     </CardHeader>
                                     <CardContent className="pt-6 space-y-4">
                                         <MetricRow label="Total Spend" value={`$${data?.googleAds.summary.totalSpend?.toLocaleString(undefined, { minimumFractionDigits: 2 }) || '0.00'}`} />
-                                        <MetricRow label="Conversions" value={Number(data?.googleAds.summary.totalConversions || 0).toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })} />
+                                        <MetricRow label="Conversions" value={Number(data?.googleAds.summary.totalConversions || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} />
                                         <MetricRow label="Conv. Value" value={`$${data?.googleAds.summary.totalConversionValue?.toLocaleString(undefined, { minimumFractionDigits: 2 }) || '0.00'}`} />
                                     </CardContent>
                                 </Card>
@@ -758,7 +920,7 @@ export function AnalyticsDashboard() {
                                 </div>
                                 <h3 className="text-lg font-bold">Google Ads Analytics</h3>
                                 <p className="text-muted-foreground">Google Ads data is not available. Check your API connection.</p>
-                                <Button variant="outline" onClick={fetchData}>Retry Connection</Button>
+                                <Button variant="outline" onClick={() => refreshData()}>Retry Connection</Button>
                             </div>
                         </div>
                     )}
