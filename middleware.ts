@@ -2,6 +2,11 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 export async function middleware(request: NextRequest) {
+    // Dev bypass: skip auth entirely when DEV_BYPASS_AUTH is set
+    if (process.env.DEV_BYPASS_AUTH === 'true') {
+        return NextResponse.next()
+    }
+
     let supabaseResponse = NextResponse.next({
         request,
     })

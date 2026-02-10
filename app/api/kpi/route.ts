@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
 const LAMATIC_API_URL = process.env.LAMATIC_API_URL;
-const LAMATIC_KPI_SUMMARY_ID = process.env.LAMATIC_KPI_SUMMARY_WORKFLOW_ID;
+const LAMATIC_KPI_DATE_RANGE_ID = process.env.LAMATIC_KPI_DATE_RANGE_WORKFLOW_ID;
 const LAMATIC_KPI_DETAIL_ID = process.env.LAMATIC_KPI_DETAIL_WORKFLOW_ID;
 const API_TOKEN = process.env.LAMATIC_API_TOKEN;
 
@@ -15,9 +15,6 @@ async function fetchGraphQL(query: string, variables: any) {
         headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${API_TOKEN}`,
-            // x-project-id is usually not needed if token is sufficient, but user included it in curl.
-            // We will relay it if we have it, or rely on token. user's .env didn't highlight x-project-id header specifically but had PROJECT_ID.
-            // Let's include it to be safe if env has it.
             ...(process.env.LAMATIC_PROJECT_ID ? { 'x-project-id': process.env.LAMATIC_PROJECT_ID } : {})
         },
         body: JSON.stringify({
@@ -34,15 +31,24 @@ async function fetchGraphQL(query: string, variables: any) {
     return json.data;
 }
 
-// GET: Fetch Summary Data
-export async function GET() {
-    if (!LAMATIC_KPI_SUMMARY_ID) {
-        return NextResponse.json({ error: 'Missing Summary Workflow ID' }, { status: 500 });
+// GET: Fetch KPI data for a specific platform + date range
+export async function GET(req: Request) {
+    if (!LAMATIC_KPI_DATE_RANGE_ID) {
+        return NextResponse.json({ error: 'Missing Date Range Workflow ID' }, { status: 500 });
+    }
+
+    const { searchParams } = new URL(req.url);
+    const platform = searchParams.get('platform');
+    const startDate = searchParams.get('startDate');
+    const endDate = searchParams.get('endDate');
+
+    if (!platform || !startDate || !endDate) {
+        return NextResponse.json({ error: 'Missing required params: platform, startDate, endDate' }, { status: 400 });
     }
 
     const query = `
-    query ExecuteWorkflow($workflowId: String!, $fetchData: String) {
-      executeWorkflow(workflowId: $workflowId, payload: { fetchData: $fetchData }) {
+    query ExecuteWorkflow($workflowId: String!, $platform: String, $startDate: String, $endDate: String) {
+      executeWorkflow(workflowId: $workflowId, payload: { platform: $platform, startDate: $startDate, endDate: $endDate }) {
         status
         result
       }
@@ -51,15 +57,16 @@ export async function GET() {
 
     try {
         const data = await fetchGraphQL(query, {
-            workflowId: LAMATIC_KPI_SUMMARY_ID,
-            fetchData: "true"
+            workflowId: LAMATIC_KPI_DATE_RANGE_ID,
+            platform,
+            startDate,
+            endDate
         });
 
-        // Structure: data.executeWorkflow.result.response
         const result = data?.executeWorkflow?.result?.response;
         return NextResponse.json(result || {});
     } catch (error: any) {
-        console.error('KPI Summary Error:', error);
+        console.error('KPI Date Range Error:', error);
         return NextResponse.json({ error: error.message || 'Failed to fetch KPI data' }, { status: 500 });
     }
 }
@@ -88,7 +95,6 @@ export async function POST(req: Request) {
             campaignId
         });
 
-        // Structure: data.executeWorkflow.result.output (based on detail kpi response.json)
         const result = data?.executeWorkflow?.result?.output;
         return NextResponse.json(result || {});
     } catch (error: any) {

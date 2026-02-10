@@ -13,6 +13,7 @@ export interface Product {
 
 export interface TermSaleProduct {
     part_code: string
+    alt_part_4: string
     name: string
     brand: string
     original_price: number
@@ -73,6 +74,7 @@ export function useProductSearch() {
                 term_sale_id: sale.term_sale_id,
                 products: (sale.products || []).map((p: any) => ({
                     part_code: p.part_code,
+                    alt_part_4: p.alt_part_4 || '',
                     name: p.name,
                     brand: p.brand,
                     original_price: p.original_price || 0,
