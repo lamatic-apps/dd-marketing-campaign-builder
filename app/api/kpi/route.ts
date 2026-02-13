@@ -31,24 +31,23 @@ async function fetchGraphQL(query: string, variables: any) {
     return json.data;
 }
 
-// GET: Fetch KPI data for a specific platform + date range
+// GET: Fetch KPI data for all platforms for a date range
 export async function GET(req: Request) {
     if (!LAMATIC_KPI_DATE_RANGE_ID) {
         return NextResponse.json({ error: 'Missing Date Range Workflow ID' }, { status: 500 });
     }
 
     const { searchParams } = new URL(req.url);
-    const platform = searchParams.get('platform');
     const startDate = searchParams.get('startDate');
     const endDate = searchParams.get('endDate');
 
-    if (!platform || !startDate || !endDate) {
-        return NextResponse.json({ error: 'Missing required params: platform, startDate, endDate' }, { status: 400 });
+    if (!startDate || !endDate) {
+        return NextResponse.json({ error: 'Missing required params: startDate, endDate' }, { status: 400 });
     }
 
     const query = `
-    query ExecuteWorkflow($workflowId: String!, $platform: String, $startDate: String, $endDate: String) {
-      executeWorkflow(workflowId: $workflowId, payload: { platform: $platform, startDate: $startDate, endDate: $endDate }) {
+    query ExecuteWorkflow($workflowId: String!, $startDate: String, $endDate: String) {
+      executeWorkflow(workflowId: $workflowId, payload: { startDate: $startDate, endDate: $endDate }) {
         status
         result
       }
@@ -58,7 +57,6 @@ export async function GET(req: Request) {
     try {
         const data = await fetchGraphQL(query, {
             workflowId: LAMATIC_KPI_DATE_RANGE_ID,
-            platform,
             startDate,
             endDate
         });
@@ -78,11 +76,11 @@ export async function POST(req: Request) {
     }
 
     try {
-        const { platform, campaignId } = await req.json();
+        const { platform, campaignId, startDate, endDate } = await req.json();
 
         const query = `
-      query ExecuteWorkflow($workflowId: String!, $platform: String, $campaignId: String) {
-        executeWorkflow(workflowId: $workflowId, payload: { platform: $platform, campaignId: $campaignId }) {
+      query ExecuteWorkflow($workflowId: String!, $platform: String, $campaignId: String, $startDate: String, $endDate: String) {
+        executeWorkflow(workflowId: $workflowId, payload: { platform: $platform, campaignId: $campaignId, startDate: $startDate, endDate: $endDate }) {
           status
           result
         }
@@ -92,7 +90,9 @@ export async function POST(req: Request) {
         const data = await fetchGraphQL(query, {
             workflowId: LAMATIC_KPI_DETAIL_ID,
             platform,
-            campaignId
+            campaignId,
+            startDate,
+            endDate
         });
 
         const result = data?.executeWorkflow?.result?.output;
