@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
+import { useSearchParams, useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
@@ -13,16 +14,39 @@ import {
     RefreshCcw,
     AlertCircle,
     CalendarIcon,
-    X
+    LayoutGrid
 } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Calendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { format } from "date-fns"
+import type { DateRange } from "react-day-picker"
 
 // Types for API Response
+// Helper: get current date in EST
+function getESTDate() {
+    const estStr = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })
+    return new Date(estStr)
+}
+
 interface KPIData {
+    all: {
+        summary: {
+            totalSpend: string
+            totalImpressions: number
+            totalClicks: number
+            totalRevenue: string
+            roas: string | number
+            ctr: string | number
+            cpc: string | number
+            emailSent: number
+            emailOpens: number
+            emailOpenRate: string | number
+            emailClickRate: string | number
+        }
+    }
     email: {
         connected: boolean
         summary: {
@@ -121,32 +145,96 @@ function CampaignDetailDialog({
     open,
     onOpenChange,
     campaignId,
-    platform
+    platform,
+    initialStartDate,
+    initialEndDate
 }: {
     open: boolean
     onOpenChange: (open: boolean) => void
     campaignId: string | null
     platform: 'mailchimp' | 'facebook' | 'googleads'
+    initialStartDate?: Date
+    initialEndDate?: Date
 }) {
     const [data, setData] = useState<DetailData | null>(null)
     const [loading, setLoading] = useState(false)
+    const [detailDateRange, setDetailDateRange] = useState<DateRange | undefined>(undefined)
+    const [detailDatePopoverOpen, setDetailDatePopoverOpen] = useState(false)
+    const [detailSelectingDate, setDetailSelectingDate] = useState<'from' | 'to'>('from')
 
-    useEffect(() => {
-        if (open && campaignId) {
-            setLoading(true)
-            fetch('/api/kpi', {
+    // Fetch detail data
+    const fetchDetail = useCallback(async (start?: Date, end?: Date) => {
+        if (!campaignId) return
+        setLoading(true)
+        try {
+            const body: any = { platform, campaignId }
+            if (start && end) {
+                body.startDate = format(start, 'yyyy-MM-dd')
+                body.endDate = format(end, 'yyyy-MM-dd')
+            }
+            const res = await fetch('/api/kpi', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ platform, campaignId })
+                body: JSON.stringify(body)
             })
-                .then(res => res.json())
-                .then(json => setData(json))
-                .catch(console.error)
-                .finally(() => setLoading(false))
+            const json = await res.json()
+            setData(json)
+        } catch (err) {
+            console.error(err)
+        } finally {
+            setLoading(false)
+        }
+    }, [platform, campaignId])
+
+    // Sync initial dates and fetch when dialog opens
+    useEffect(() => {
+        if (open && campaignId) {
+            const startDate = initialStartDate
+            const endDate = initialEndDate
+            setDetailDateRange({ from: startDate, to: endDate })
+            fetchDetail(startDate, endDate)
         } else {
             setData(null)
         }
-    }, [open, campaignId, platform])
+    }, [open, campaignId, initialStartDate, initialEndDate, fetchDetail])
+
+    // Handle date change inside detail dialog
+    const handleDetailDateSelect = useCallback((date: Date | undefined) => {
+        if (!date) return
+        setDetailDateRange(prev => {
+            let newFrom = prev?.from
+            let newTo = prev?.to
+            if (detailSelectingDate === 'from') {
+                newFrom = date
+                if (newTo && date > newTo) newTo = undefined
+                setDetailSelectingDate('to')
+            } else {
+                newTo = date
+                if (newFrom && date < newFrom) newFrom = undefined
+            }
+            const newRange = { from: newFrom, to: newTo }
+            if (newRange.from && newRange.to) {
+                fetchDetail(newRange.from, newRange.to)
+            }
+            return newRange
+        })
+    }, [detailSelectingDate, fetchDetail])
+
+    const handleDetailQuickRange = useCallback((preset: string) => {
+        const today = getESTDate()
+        let start = new Date(today)
+        switch (preset) {
+            case '24h': start.setDate(today.getDate() - 1); break
+            case '3d': start.setDate(today.getDate() - 3); break
+            case '7d': start.setDate(today.getDate() - 7); break
+            case '14d': start.setDate(today.getDate() - 14); break
+            case '30d': start.setDate(today.getDate() - 30); break
+            default: start.setDate(today.getDate() - 7)
+        }
+        setDetailDateRange({ from: start, to: today })
+        setDetailDatePopoverOpen(false)
+        fetchDetail(start, today)
+    }, [fetchDetail])
 
     const renderMetrics = () => {
         if (!data?.metrics) return null;
@@ -240,6 +328,34 @@ function CampaignDetailDialog({
                     <MetricBox label="CTR" value={`${parseFloat(data.metrics.ctr || 0).toFixed(2)}%`} color="text-blue-600" />
                     <MetricBox label="CPC" value={`$${parseFloat(data.metrics.cpc || 0).toFixed(2)}`} color="text-orange-600" />
                 </div>
+                {/* Daily Breakdown Table */}
+                {data.timeseries && data.timeseries.length > 0 && (
+                    <div className="mt-2">
+                        <h4 className="text-sm font-semibold text-muted-foreground mb-2">Daily Breakdown</h4>
+                        <ScrollArea className="h-[220px] rounded-lg border">
+                            <table className="w-full text-sm">
+                                <thead className="sticky top-0 bg-muted/80 backdrop-blur-sm">
+                                    <tr className="border-b">
+                                        <th className="text-left p-2 font-medium">Date</th>
+                                        <th className="text-right p-2 font-medium">Spend</th>
+                                        <th className="text-right p-2 font-medium">Impr.</th>
+                                        <th className="text-right p-2 font-medium">Clicks</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {data.timeseries.map((row: any, i: number) => (
+                                        <tr key={i} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                                            <td className="p-2 font-mono text-xs">{row.date}</td>
+                                            <td className="p-2 text-right font-medium">${parseFloat(row.spend || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                            <td className="p-2 text-right">{parseInt(row.impressions || 0).toLocaleString()}</td>
+                                            <td className="p-2 text-right">{parseInt(row.clicks || 0).toLocaleString()}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </ScrollArea>
+                    </div>
+                )}
             </div>
         )
     }
@@ -257,6 +373,77 @@ function CampaignDetailDialog({
                             {platform === 'mailchimp' ? 'Email Campaign Report' : platform === 'facebook' ? 'Facebook Ad Insights' : 'Google Ads Campaign'}
                         </DialogDescription>
                     </DialogHeader>
+                    {/* Date picker for Facebook / Google Ads */}
+                    {platform !== 'mailchimp' ? (
+                        <div className="mt-3 flex items-center gap-2">
+                            <Popover open={detailDatePopoverOpen} onOpenChange={setDetailDatePopoverOpen}>
+                                <PopoverTrigger asChild>
+                                    <Button variant="outline" size="sm" className="gap-2 text-xs font-normal">
+                                        <CalendarIcon className="h-3 w-3" />
+                                        {detailDateRange?.from && detailDateRange?.to
+                                            ? `${format(detailDateRange.from, 'MMM d')} – ${format(detailDateRange.to, 'MMM d, yyyy')}`
+                                            : 'Select dates'}
+                                    </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-auto p-0" align="start">
+                                    <div className="flex gap-2 px-4 pt-3 pb-1">
+                                        <Button
+                                            variant={detailSelectingDate === 'from' ? 'default' : 'outline'}
+                                            size="sm"
+                                            className="flex-1 text-xs h-8"
+                                            onClick={() => setDetailSelectingDate('from')}
+                                        >
+                                            From: {detailDateRange?.from ? format(detailDateRange.from, 'MMM d') : '—'}
+                                        </Button>
+                                        <Button
+                                            variant={detailSelectingDate === 'to' ? 'default' : 'outline'}
+                                            size="sm"
+                                            className="flex-1 text-xs h-8"
+                                            onClick={() => setDetailSelectingDate('to')}
+                                        >
+                                            To: {detailDateRange?.to ? format(detailDateRange.to, 'MMM d') : '—'}
+                                        </Button>
+                                    </div>
+                                    <Calendar
+                                        mode="single"
+                                        selected={detailSelectingDate === 'from' ? detailDateRange?.from : detailDateRange?.to}
+                                        onSelect={handleDetailDateSelect}
+                                        numberOfMonths={1}
+                                        disabled={(date) => date > getESTDate()}
+                                        modifiers={{
+                                            range_middle: (date) => {
+                                                if (!detailDateRange?.from || !detailDateRange?.to) return false
+                                                return date > detailDateRange.from && date < detailDateRange.to
+                                            },
+                                            range_start: detailDateRange?.from ? [detailDateRange.from] : [],
+                                            range_end: detailDateRange?.to ? [detailDateRange.to] : [],
+                                        }}
+                                        modifiersStyles={{
+                                            range_middle: { backgroundColor: 'hsl(var(--primary) / 0.1)', borderRadius: 0 },
+                                            range_start: { backgroundColor: 'hsl(var(--primary))', color: 'white', borderRadius: '50%' },
+                                            range_end: { backgroundColor: 'hsl(var(--primary))', color: 'white', borderRadius: '50%' },
+                                        }}
+                                    />
+                                    <div className="border-t border-border/50 p-3">
+                                        <Select onValueChange={handleDetailQuickRange}>
+                                            <SelectTrigger className="w-full">
+                                                <SelectValue placeholder="Quick Time Range" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="24h">Last 24 hours</SelectItem>
+                                                <SelectItem value="3d">Last 3 days</SelectItem>
+                                                <SelectItem value="7d">Last 7 days</SelectItem>
+                                                <SelectItem value="14d">Last 2 weeks</SelectItem>
+                                                <SelectItem value="30d">Last month</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </PopoverContent>
+                            </Popover>
+                        </div>
+                    ) : (
+                        <p className="text-xs text-muted-foreground mt-2 italic">Showing lifetime campaign stats</p>
+                    )}
                 </div>
 
                 {loading ? (
@@ -329,58 +516,64 @@ function CampaignList({ campaigns, type, onSelect }: { campaigns: any[], type: '
     if (!campaigns?.length) return <div className="text-muted-foreground text-sm p-8 text-center bg-muted/20 rounded-xl border border-dashed">No recent activity</div>
 
     return (
-        <div className="space-y-1 mt-2">
-            {campaigns.slice(0, 5).map((c) => (
-                <button
-                    key={c.id}
-                    onClick={() => onSelect(c.id)}
-                    className="group w-full flex items-center justify-between p-3 hover:bg-muted/50 rounded-lg transition-all duration-200 text-left border border-transparent hover:border-border/40"
-                >
-                    <div className="flex items-center gap-3 min-w-0">
-                        <div className={`w-1.5 h-1.5 rounded-full ${type === 'email' ? 'bg-blue-500' : 'bg-purple-500'} flex-shrink-0`}></div>
-                        <div className="flex flex-col min-w-0">
-                            <span className="font-medium text-sm truncate group-hover:text-primary transition-colors pr-2">
-                                {c.name}
-                            </span>
-                            <span className="text-[11px] text-muted-foreground">
-                                {c.sendDate ? new Date(c.sendDate).toLocaleDateString() : 'ID: ' + c.id}
-                            </span>
+        <ScrollArea className="h-[420px]">
+            <div className="space-y-1 mt-2 pr-4">
+                {campaigns.map((c) => (
+                    <button
+                        key={c.id}
+                        onClick={() => onSelect(c.id)}
+                        className="group w-full flex items-center justify-between p-3 hover:bg-muted/50 rounded-lg transition-all duration-200 text-left border border-transparent hover:border-border/40"
+                    >
+                        <div className="flex items-center gap-3 min-w-0">
+                            <div className={`w-1.5 h-1.5 rounded-full ${type === 'email' ? 'bg-blue-500' : 'bg-purple-500'} flex-shrink-0`}></div>
+                            <div className="flex flex-col min-w-0">
+                                <span className="font-medium text-sm truncate group-hover:text-primary transition-colors pr-2">
+                                    {c.name}
+                                </span>
+                                <span className="text-[11px] text-muted-foreground">
+                                    {c.sendDate ? new Date(c.sendDate).toLocaleDateString() : 'ID: ' + c.id}
+                                </span>
+                            </div>
                         </div>
-                    </div>
-                    <div className="flex items-center gap-2 ml-2">
-                        {type === 'email' ? (
-                            <>
-                                <span className="text-xs font-mono text-muted-foreground bg-muted/30 px-2 py-0.5 rounded whitespace-nowrap">
-                                    {(c.sent || 0).toLocaleString()} sent
-                                </span>
-                                {c.revenue > 0 && (
-                                    <span className="text-xs font-mono text-green-600 bg-green-500/10 px-2 py-0.5 rounded whitespace-nowrap">
-                                        ${c.revenue.toFixed(2)}
+                        <div className="flex items-center gap-2 ml-2">
+                            {type === 'email' ? (
+                                <>
+                                    <span className="text-xs font-mono text-muted-foreground bg-muted/30 px-2 py-0.5 rounded whitespace-nowrap">
+                                        {(c.sent || 0).toLocaleString()} sent
                                     </span>
-                                )}
-                            </>
-                        ) : (
-                            <>
-                                <span className="text-xs font-mono text-muted-foreground bg-muted/30 px-2 py-0.5 rounded whitespace-nowrap">
-                                    ${Number(c.spend || 0).toFixed(2)}
-                                </span>
-                                {parseFloat(c.roas) > 0 && (
-                                    <span className="text-xs font-mono text-purple-600 bg-purple-500/10 px-2 py-0.5 rounded whitespace-nowrap">
-                                        {c.roas}x
+                                    {c.revenue > 0 && (
+                                        <span className="text-xs font-mono text-green-600 bg-green-500/10 px-2 py-0.5 rounded whitespace-nowrap">
+                                            ${c.revenue.toFixed(2)}
+                                        </span>
+                                    )}
+                                </>
+                            ) : (
+                                <>
+                                    <span className="text-xs font-mono text-muted-foreground bg-muted/30 px-2 py-0.5 rounded whitespace-nowrap">
+                                        ${Number(c.spend || 0).toFixed(2)}
                                     </span>
-                                )}
-                            </>
-                        )}
-                    </div>
-                </button>
-            ))}
-        </div>
+                                    {parseFloat(c.roas) > 0 && (
+                                        <span className="text-xs font-mono text-purple-600 bg-purple-500/10 px-2 py-0.5 rounded whitespace-nowrap">
+                                            {c.roas}x
+                                        </span>
+                                    )}
+                                </>
+                            )}
+                        </div>
+                    </button>
+                ))}
+            </div>
+        </ScrollArea>
     )
 }
 
 export function AnalyticsDashboard() {
+    const searchParams = useSearchParams()
+    const router = useRouter()
+
     const [data, setData] = useState<KPIData | null>(null)
     const [loading, setLoading] = useState(true)
+    const [initialLoading, setInitialLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
 
     // Detail View State
@@ -388,11 +581,30 @@ export function AnalyticsDashboard() {
     const [selectedId, setSelectedId] = useState<string | null>(null)
     const [selectedPlatform, setSelectedPlatform] = useState<'mailchimp' | 'facebook' | 'googleads'>('mailchimp')
 
-    // Date Filter State
-    const [startDate, setStartDate] = useState<Date | undefined>(undefined)
-    const [endDate, setEndDate] = useState<Date | undefined>(undefined)
-    const [activeTab, setActiveTab] = useState<string>("email")
-    const [isFiltered, setIsFiltered] = useState(false)
+    // Date picker popover state
+    const [datePopoverOpen, setDatePopoverOpen] = useState(false)
+    const [selectingDate, setSelectingDate] = useState<'from' | 'to'>('from')
+
+    // Read initial state from URL params
+    const activeTab = searchParams.get('tab') || 'all'
+    const urlStart = searchParams.get('start')
+    const urlEnd = searchParams.get('end')
+
+    // Compute default dates in EST
+    const getDefaultDates = useCallback((): { start: Date; end: Date } => {
+        const today = getESTDate()
+        const sevenDaysAgo = new Date(today)
+        sevenDaysAgo.setDate(today.getDate() - 7)
+        return { start: sevenDaysAgo, end: today }
+    }, [])
+
+    const [dateRange, setDateRange] = useState<DateRange | undefined>(() => {
+        if (urlStart && urlEnd) {
+            return { from: new Date(urlStart), to: new Date(urlEnd) }
+        }
+        const { start, end } = getDefaultDates()
+        return { from: start, to: end }
+    })
 
     const openDetail = (id: string, platform: 'mailchimp' | 'facebook' | 'googleads') => {
         setSelectedId(id)
@@ -400,105 +612,106 @@ export function AnalyticsDashboard() {
         setDetailOpen(true)
     }
 
-    // Map tab values to platform API values
-    const tabToPlatform: Record<string, string> = {
-        email: 'mailchimp',
-        facebook: 'facebook',
-        google: 'googleads'
-    }
+    // Update URL params without navigation
+    const updateURL = useCallback((tab: string, start?: Date, end?: Date) => {
+        const params = new URLSearchParams(searchParams.toString())
+        params.set('tab', tab)
+        if (start && end) {
+            params.set('start', format(start, 'yyyy-MM-dd'))
+            params.set('end', format(end, 'yyyy-MM-dd'))
+        }
+        router.replace(`?${params.toString()}`, { scroll: false })
+    }, [searchParams, router])
 
-    // Fetch a single platform's KPI data for a date range
-    const fetchPlatformData = async (platform: string, start: Date, end: Date) => {
-        const params = new URLSearchParams({
-            platform,
-            startDate: format(start, 'yyyy-MM-dd'),
-            endDate: format(end, 'yyyy-MM-dd')
-        })
-        const res = await fetch(`/api/kpi?${params.toString()}`)
-        if (!res.ok) throw new Error(`Failed to fetch ${platform} data`)
-        return res.json()
-    }
-
-    // Fetch all platforms in parallel for the given date range
-    const fetchAllPlatforms = async (start: Date, end: Date) => {
+    // Fetch all data in one API call
+    const fetchData = useCallback(async (start: Date, end: Date) => {
         setLoading(true)
         setError(null)
         try {
-            const [mailchimpData, facebookData, googleAdsData] = await Promise.all([
-                fetchPlatformData('mailchimp', start, end),
-                fetchPlatformData('facebook', start, end),
-                fetchPlatformData('googleads', start, end)
-            ])
-
-            setData({
-                ...mailchimpData,
-                ...facebookData,
-                ...googleAdsData,
-                fetchedAt: new Date().toISOString()
+            const params = new URLSearchParams({
+                startDate: format(start, 'yyyy-MM-dd'),
+                endDate: format(end, 'yyyy-MM-dd')
             })
+            const res = await fetch(`/api/kpi?${params.toString()}`)
+            if (!res.ok) throw new Error('Failed to fetch data')
+            const json = await res.json()
+            setData({ ...json, fetchedAt: json.fetchedAt || new Date().toISOString() })
+            setInitialLoading(false)
         } catch (err) {
             console.error(err)
             setError('Failed to load KPI data. Please try again.')
         } finally {
             setLoading(false)
         }
-    }
-
-    // Fetch a single platform for the current date range (used by Apply Filter)
-    const fetchSinglePlatform = async (platform: string, start: Date, end: Date) => {
-        setLoading(true)
-        setError(null)
-        try {
-            const json = await fetchPlatformData(platform, start, end)
-            setData((prev: any) => ({
-                ...prev,
-                ...json,
-                fetchedAt: json.fetchedAt || new Date().toISOString()
-            }))
-            setIsFiltered(true)
-        } catch (err) {
-            console.error(err)
-            setError('Failed to load KPI data. Please try again.')
-        } finally {
-            setLoading(false)
-        }
-    }
-
-    const applyDateFilter = () => {
-        if (!startDate || !endDate) return
-        const platform = tabToPlatform[activeTab]
-        if (!platform) return
-        fetchSinglePlatform(platform, startDate, endDate)
-    }
-
-    const clearDateFilter = () => {
-        // Reset to default 30-day range
-        const now = new Date()
-        const thirtyDaysAgo = new Date()
-        thirtyDaysAgo.setDate(now.getDate() - 30)
-        setStartDate(thirtyDaysAgo)
-        setEndDate(now)
-        setIsFiltered(false)
-        fetchAllPlatforms(thirtyDaysAgo, now)
-    }
-
-    const refreshData = () => {
-        if (startDate && endDate) {
-            fetchAllPlatforms(startDate, endDate)
-        }
-    }
-
-    useEffect(() => {
-        // Default: last 30 days
-        const now = new Date()
-        const thirtyDaysAgo = new Date()
-        thirtyDaysAgo.setDate(now.getDate() - 30)
-        setStartDate(thirtyDaysAgo)
-        setEndDate(now)
-        fetchAllPlatforms(thirtyDaysAgo, now)
     }, [])
 
-    if (loading) {
+    // Handle tab change
+    const handleTabChange = useCallback((tab: string) => {
+        updateURL(tab, dateRange?.from, dateRange?.to)
+    }, [updateURL, dateRange])
+
+    // Handle single date selection for From/To
+    const handleSingleDateSelect = useCallback((date: Date | undefined) => {
+        if (!date) return
+        setDateRange(prev => {
+            let newFrom = prev?.from
+            let newTo = prev?.to
+            if (selectingDate === 'from') {
+                newFrom = date
+                // If new from > current to, reset to
+                if (newTo && date > newTo) newTo = undefined
+                // Auto-switch to "to" selection
+                setSelectingDate('to')
+            } else {
+                newTo = date
+                // If new to < current from, reset from
+                if (newFrom && date < newFrom) newFrom = undefined
+            }
+            const newRange = { from: newFrom, to: newTo }
+            if (newRange.from && newRange.to) {
+                updateURL(activeTab, newRange.from, newRange.to)
+                fetchData(newRange.from, newRange.to)
+            }
+            return newRange
+        })
+    }, [selectingDate, activeTab, updateURL, fetchData])
+
+    // Quick time range presets
+    const handleQuickRange = useCallback((preset: string) => {
+        const today = getESTDate()
+        let start = new Date(today)
+        switch (preset) {
+            case '24h': start.setDate(today.getDate() - 1); break
+            case '3d': start.setDate(today.getDate() - 3); break
+            case '7d': start.setDate(today.getDate() - 7); break
+            case '14d': start.setDate(today.getDate() - 14); break
+            case '30d': start.setDate(today.getDate() - 30); break
+            default: start.setDate(today.getDate() - 7)
+        }
+        const newRange: DateRange = { from: start, to: today }
+        setDateRange(newRange)
+        updateURL(activeTab, start, today)
+        fetchData(start, today)
+        setDatePopoverOpen(false)
+    }, [activeTab, updateURL, fetchData])
+
+    const refreshData = useCallback(() => {
+        if (dateRange?.from && dateRange?.to) {
+            fetchData(dateRange.from, dateRange.to)
+        }
+    }, [dateRange, fetchData])
+
+    useEffect(() => {
+        const start = urlStart ? new Date(urlStart) : getDefaultDates().start
+        const end = urlEnd ? new Date(urlEnd) : getDefaultDates().end
+        if (!urlStart || !urlEnd) {
+            updateURL(activeTab, start, end)
+        }
+        fetchData(start, end)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
+
+    if (initialLoading) {
         return (
             <div className="h-[50vh] flex flex-col items-center justify-center space-y-4 animate-in fade-in duration-500">
                 <RefreshCcw className="h-12 w-12 animate-spin text-primary/20" />
@@ -523,7 +736,16 @@ export function AnalyticsDashboard() {
     }
 
     return (
-        <div className="p-8 space-y-8 max-w-[1600px] mx-auto animate-in fade-in duration-500 slide-in-from-bottom-4">
+        <div className="p-8 space-y-8 max-w-[1600px] mx-auto animate-in fade-in duration-500 slide-in-from-bottom-4 relative">
+            {/* Inline loading overlay for refetches */}
+            {loading && !initialLoading && (
+                <div className="absolute inset-0 bg-background/60 backdrop-blur-[1px] z-50 flex items-center justify-center rounded-xl">
+                    <div className="flex items-center gap-2 bg-background/90 px-4 py-2 rounded-lg border shadow-sm">
+                        <RefreshCcw className="h-4 w-4 animate-spin text-primary" />
+                        <span className="text-sm text-muted-foreground">Updating...</span>
+                    </div>
+                </div>
+            )}
             {/* Header */}
             <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-border/40 pb-6">
                 <div className="space-y-1">
@@ -538,12 +760,12 @@ export function AnalyticsDashboard() {
                 </div>
                 <div className="flex items-center gap-3">
                     <div className="flex gap-2 mr-4">
-                        <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border ${data?.email.connected ? 'bg-green-500/10 text-green-700 border-green-200' : 'bg-destructive/10 text-destructive border-destructive/20'}`}>
-                            <div className={`w-1.5 h-1.5 rounded-full ${data?.email.connected ? 'bg-green-600' : 'bg-destructive'}`}></div>
+                        <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border ${data?.email?.connected ? 'bg-green-500/10 text-green-700 border-green-200' : 'bg-destructive/10 text-destructive border-destructive/20'}`}>
+                            <div className={`w-1.5 h-1.5 rounded-full ${data?.email?.connected ? 'bg-green-600' : 'bg-destructive'}`}></div>
                             Mailchimp
                         </div>
-                        <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border ${data?.facebook.connected ? 'bg-green-500/10 text-green-700 border-green-200' : 'bg-destructive/10 text-destructive border-destructive/20'}`}>
-                            <div className={`w-1.5 h-1.5 rounded-full ${data?.facebook.connected ? 'bg-green-600' : 'bg-destructive'}`}></div>
+                        <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border ${data?.facebook?.connected ? 'bg-green-500/10 text-green-700 border-green-200' : 'bg-destructive/10 text-destructive border-destructive/20'}`}>
+                            <div className={`w-1.5 h-1.5 rounded-full ${data?.facebook?.connected ? 'bg-green-600' : 'bg-destructive'}`}></div>
                             Facebook
                         </div>
                         <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border ${data?.googleAds?.connected ? 'bg-green-500/10 text-green-700 border-green-200' : 'bg-destructive/10 text-destructive border-destructive/20'}`}>
@@ -558,75 +780,14 @@ export function AnalyticsDashboard() {
                 </div>
             </div>
 
-            {/* Date Range Filter */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 p-4 bg-muted/30 rounded-xl border border-border/40">
-                <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-                    <CalendarIcon className="h-4 w-4" />
-                    Filter by Date:
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                    <Popover>
-                        <PopoverTrigger asChild>
-                            <Button variant="outline" size="sm" className={`gap-2 min-w-[140px] justify-start font-normal ${!startDate && 'text-muted-foreground'}`}>
-                                <CalendarIcon className="h-3.5 w-3.5" />
-                                {startDate ? format(startDate, 'MMM dd, yyyy') : 'Start date'}
-                            </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0" align="start">
-                            <Calendar
-                                mode="single"
-                                selected={startDate}
-                                onSelect={setStartDate}
-                                disabled={(date) => endDate ? date > endDate : false}
-                                initialFocus
-                            />
-                        </PopoverContent>
-                    </Popover>
-                    <span className="text-muted-foreground text-sm">to</span>
-                    <Popover>
-                        <PopoverTrigger asChild>
-                            <Button variant="outline" size="sm" className={`gap-2 min-w-[140px] justify-start font-normal ${!endDate && 'text-muted-foreground'}`}>
-                                <CalendarIcon className="h-3.5 w-3.5" />
-                                {endDate ? format(endDate, 'MMM dd, yyyy') : 'End date'}
-                            </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0" align="start">
-                            <Calendar
-                                mode="single"
-                                selected={endDate}
-                                onSelect={setEndDate}
-                                disabled={(date) => startDate ? date < startDate : false}
-                                initialFocus
-                            />
-                        </PopoverContent>
-                    </Popover>
-                    <Button
-                        size="sm"
-                        onClick={applyDateFilter}
-                        disabled={!startDate || !endDate || loading}
-                        className="gap-2 bg-primary hover:bg-primary/90"
-                    >
-                        {loading ? <RefreshCcw className="h-3.5 w-3.5 animate-spin" /> : <CalendarIcon className="h-3.5 w-3.5" />}
-                        Apply Filter
-                    </Button>
-                    {isFiltered && (
-                        <Button variant="ghost" size="sm" onClick={clearDateFilter} className="gap-1 text-muted-foreground hover:text-foreground">
-                            <X className="h-3.5 w-3.5" />
-                            Clear
-                        </Button>
-                    )}
-                </div>
-                {isFiltered && (
-                    <Badge variant="secondary" className="ml-auto text-xs">
-                        Filtered: {activeTab === 'email' ? 'Mailchimp' : activeTab === 'facebook' ? 'Facebook' : activeTab === 'google' ? 'Google Ads' : activeTab}
-                    </Badge>
-                )}
-            </div>
-
             {/* Main Tabs */}
-            <Tabs defaultValue="email" className="space-y-8" onValueChange={setActiveTab}>
-                <div className="sticky top-0 z-10 bg-background/95 backdrop-blur py-2">
+            <Tabs value={activeTab} className="space-y-8" onValueChange={handleTabChange}>
+                <div className="sticky top-0 z-10 bg-background/95 backdrop-blur py-2 flex flex-col sm:flex-row sm:items-center gap-3">
                     <TabsList className="bg-muted/30 border border-border/50 p-1 h-12 w-full md:w-auto inline-flex rounded-xl">
+                        <TabsTrigger value="all" className="gap-2 px-6 h-10 rounded-lg data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-sm transition-all focus-visible:ring-0">
+                            <LayoutGrid className="h-4 w-4" />
+                            <span className="font-medium">All</span>
+                        </TabsTrigger>
                         <TabsTrigger value="email" className="gap-2 px-6 h-10 rounded-lg data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-sm transition-all focus-visible:ring-0">
                             <Mail className="h-4 w-4" />
                             <span className="font-medium">Email</span>
@@ -644,7 +805,124 @@ export function AnalyticsDashboard() {
                             <span className="font-medium">Google Ads</span>
                         </TabsTrigger>
                     </TabsList>
+                    <Popover open={datePopoverOpen} onOpenChange={setDatePopoverOpen}>
+                        <PopoverTrigger asChild>
+                            <Button variant="outline" size="sm" className="gap-2 min-w-[240px] justify-start font-normal sm:ml-auto">
+                                <CalendarIcon className="h-3.5 w-3.5" />
+                                {dateRange?.from ? (
+                                    dateRange.to ? (
+                                        <>{format(dateRange.from, 'MMM d, yyyy')} – {format(dateRange.to, 'MMM d, yyyy')}</>
+                                    ) : (
+                                        format(dateRange.from, 'MMM d, yyyy')
+                                    )
+                                ) : (
+                                    'Select date range'
+                                )}
+                            </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="end">
+                            <div className="flex gap-2 px-4 pt-3 pb-1">
+                                <Button
+                                    variant={selectingDate === 'from' ? 'default' : 'outline'}
+                                    size="sm"
+                                    className="flex-1 text-xs h-8"
+                                    onClick={() => setSelectingDate('from')}
+                                >
+                                    From: {dateRange?.from ? format(dateRange.from, 'MMM d') : '—'}
+                                </Button>
+                                <Button
+                                    variant={selectingDate === 'to' ? 'default' : 'outline'}
+                                    size="sm"
+                                    className="flex-1 text-xs h-8"
+                                    onClick={() => setSelectingDate('to')}
+                                >
+                                    To: {dateRange?.to ? format(dateRange.to, 'MMM d') : '—'}
+                                </Button>
+                            </div>
+                            <Calendar
+                                mode="single"
+                                selected={selectingDate === 'from' ? dateRange?.from : dateRange?.to}
+                                onSelect={handleSingleDateSelect}
+                                numberOfMonths={1}
+                                disabled={(date) => date > getESTDate()}
+                                initialFocus
+                                modifiers={{
+                                    range_middle: (date) => {
+                                        if (!dateRange?.from || !dateRange?.to) return false
+                                        return date > dateRange.from && date < dateRange.to
+                                    },
+                                    range_start: dateRange?.from ? [dateRange.from] : [],
+                                    range_end: dateRange?.to ? [dateRange.to] : [],
+                                }}
+                                modifiersStyles={{
+                                    range_middle: { backgroundColor: 'hsl(var(--primary) / 0.1)', borderRadius: 0 },
+                                    range_start: { backgroundColor: 'hsl(var(--primary))', color: 'white', borderRadius: '50%' },
+                                    range_end: { backgroundColor: 'hsl(var(--primary))', color: 'white', borderRadius: '50%' },
+                                }}
+                            />
+                            <div className="border-t border-border/50 p-3">
+                                <Select onValueChange={handleQuickRange}>
+                                    <SelectTrigger className="w-full">
+                                        <SelectValue placeholder="Quick Time Range" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="24h">Last 24 hours</SelectItem>
+                                        <SelectItem value="3d">Last 3 days</SelectItem>
+                                        <SelectItem value="7d">Last 7 days</SelectItem>
+                                        <SelectItem value="14d">Last 2 weeks</SelectItem>
+                                        <SelectItem value="30d">Last month</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </PopoverContent>
+                    </Popover>
                 </div>
+
+                {/* ALL TAB */}
+                <TabsContent value="all" className="space-y-8">
+                    {/* Spend / Revenue / ROAS */}
+                    <div className="grid gap-4 md:grid-cols-3">
+                        <div className="p-6 bg-gradient-to-br from-red-500/10 to-orange-500/5 rounded-xl border border-red-200/50">
+                            <p className="text-sm text-muted-foreground mb-1">Total Ad Spend</p>
+                            <p className="text-3xl font-bold text-red-600">${parseFloat(data?.all?.summary?.totalSpend || '0').toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                        </div>
+                        <div className="p-6 bg-gradient-to-br from-green-500/10 to-emerald-500/5 rounded-xl border border-green-200/50">
+                            <p className="text-sm text-muted-foreground mb-1">Total Revenue</p>
+                            <p className="text-3xl font-bold text-green-600">${parseFloat(data?.all?.summary?.totalRevenue || '0').toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                        </div>
+                        <div className="p-6 bg-gradient-to-br from-purple-500/10 to-violet-500/5 rounded-xl border border-purple-200/50">
+                            <p className="text-sm text-muted-foreground mb-1">ROAS</p>
+                            <p className="text-3xl font-bold text-purple-600">{data?.all?.summary?.roas || '0.00'}x</p>
+                            <p className="text-xs text-muted-foreground mt-2">Return on Ad Spend</p>
+                        </div>
+                    </div>
+
+                    {/* Performance Metrics */}
+                    <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+                        <MetricBox label="Total Impressions" value={data?.all?.summary?.totalImpressions?.toLocaleString() || 0} />
+                        <MetricBox label="Total Clicks" value={data?.all?.summary?.totalClicks?.toLocaleString() || 0} />
+                        <MetricBox label="Avg. CTR" value={`${data?.all?.summary?.ctr || 0}%`} color="text-purple-600" />
+                        <MetricBox label="Avg. CPC" value={`$${data?.all?.summary?.cpc || '0.00'}`} color="text-orange-600" />
+                    </div>
+
+                    {/* Email Metrics */}
+                    <Card className="border-border/50 shadow-sm">
+                        <CardHeader className="border-b border-border/40 bg-muted/20 pb-4">
+                            <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                                <Mail className="h-4 w-4 text-muted-foreground" />
+                                Email Performance
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent className="pt-6">
+                            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+                                <MetricBox label="Emails Sent" value={data?.all?.summary?.emailSent?.toLocaleString() || 0} />
+                                <MetricBox label="Opens" value={data?.all?.summary?.emailOpens?.toLocaleString() || 0} />
+                                <MetricBox label="Open Rate" value={`${data?.all?.summary?.emailOpenRate || '0.00'}%`} color="text-green-600" />
+                                <MetricBox label="Click Rate" value={`${data?.all?.summary?.emailClickRate || '0.00'}%`} color="text-blue-600" />
+                            </div>
+                        </CardContent>
+                    </Card>
+                </TabsContent>
 
                 {/* EMAIL TAB */}
                 <TabsContent value="email" className="space-y-8">
@@ -932,6 +1210,8 @@ export function AnalyticsDashboard() {
                 onOpenChange={setDetailOpen}
                 campaignId={selectedId}
                 platform={selectedPlatform}
+                initialStartDate={dateRange?.from}
+                initialEndDate={dateRange?.to}
             />
         </div>
     )
