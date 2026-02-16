@@ -1,14 +1,21 @@
 "use client"
 
 import type React from "react"
+import { useState, useEffect } from "react"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
+import { createBrowserClient } from "@supabase/ssr"
 import { cn } from "@/lib/utils"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Badge } from "@/components/ui/badge"
 import { Calendar, FileText, BarChart3, Settings, LogOut, Anchor } from "lucide-react"
+
+const supabase = createBrowserClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)
 
 const navItems = [
   {
@@ -41,8 +48,40 @@ const navItems = [
 export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
+  const [user, setUser] = useState<{ name: string; email: string; avatarUrl: string | null } | null>(null)
 
-  const handleLogout = () => {
+  useEffect(() => {
+    async function fetchUser() {
+      const { data: { user: authUser } } = await supabase.auth.getUser()
+      if (authUser) {
+        // Try to get the user profile from public.User table
+        const { data: profile } = await supabase
+          .from('User')
+          .select('name, email, avatarUrl')
+          .eq('id', authUser.id)
+          .single()
+
+        if (profile) {
+          setUser({
+            name: profile.name || profile.email?.split('@')[0] || 'User',
+            email: profile.email,
+            avatarUrl: profile.avatarUrl,
+          })
+        } else {
+          // Fallback to auth metadata
+          setUser({
+            name: authUser.user_metadata?.full_name || authUser.user_metadata?.name || authUser.email?.split('@')[0] || 'User',
+            email: authUser.email || '',
+            avatarUrl: authUser.user_metadata?.avatar_url || authUser.user_metadata?.picture || null,
+          })
+        }
+      }
+    }
+    fetchUser()
+  }, [])
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
     localStorage.removeItem("dd_user")
     router.push("/login")
   }
@@ -107,14 +146,14 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                 className="w-full justify-start gap-3 px-3 py-6 text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
               >
                 <Avatar className="w-8 h-8">
-                  <AvatarImage src="/professional-woman-avatar.png" />
+                  <AvatarImage src={user?.avatarUrl || undefined} referrerPolicy="no-referrer" />
                   <AvatarFallback className="bg-sidebar-primary text-sidebar-primary-foreground text-sm">
-                    SH
+                    {user?.name?.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || 'U'}
                   </AvatarFallback>
                 </Avatar>
-                <div className="flex-1 text-left">
-                  <p className="text-sm font-medium">Shelley</p>
-                  <p className="text-xs text-sidebar-foreground/60">Marketing Lead</p>
+                <div className="flex-1 text-left min-w-0">
+                  <p className="text-sm font-medium truncate">{user?.name || 'Loading...'}</p>
+                  <p className="text-xs text-sidebar-foreground/60 truncate">{user?.email || ''}</p>
                 </div>
               </Button>
             </DropdownMenuTrigger>
