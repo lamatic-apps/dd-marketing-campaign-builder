@@ -170,6 +170,8 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
       const productSkus = localCampaign.products?.map((p: any) => p.sku) || []
       const activeChannels = getActiveChannels(localCampaign.channels || {})
 
+      const imgChannels = localCampaign.imageChannels || {}
+
       const data = await generateCampaign({
         topic: localCampaign.title,
         bundleId: "",
@@ -180,6 +182,10 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
         channels_facebook: activeChannels.includes("facebook") ? "true" : "false",
         channels_instagram: activeChannels.includes("instagram") ? "true" : "false",
         channels_twitter: activeChannels.includes("twitter") ? "true" : "false",
+        imageChannels_blog: imgChannels.blog ? "true" : "false",
+        imageChannels_facebook: imgChannels.facebook ? "true" : "false",
+        imageChannels_instagram: imgChannels.instagram ? "true" : "false",
+        imageChannels_twitter: imgChannels.twitter ? "true" : "false",
         notes: localCampaign.notes || "",
         contentFocus: String(localCampaign.contentFocus || 3),
       })

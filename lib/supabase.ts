@@ -30,6 +30,7 @@ export interface Campaign {
     status: CampaignStatus;
     scheduledDate?: string;
     channels: Record<string, boolean>;
+    imageChannels?: Record<string, boolean>;
     products?: Array<{ sku: string; name: string; price?: number }>;
     contentFocus: number;
     notes?: string;

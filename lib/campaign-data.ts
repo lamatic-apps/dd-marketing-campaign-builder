@@ -22,6 +22,7 @@ export interface Campaign {
   status: CampaignStatus
   scheduledDate?: string  // ISO date string
   channels: Record<string, boolean>  // {blog: true, email: true, ...}
+  imageChannels?: Record<string, boolean>  // {blog: true, facebook: false, ...}
   products?: Array<{
     id?: number
     name: string

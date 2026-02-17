@@ -36,6 +36,10 @@ export async function POST(request: NextRequest) {
         $channels_facebook: String
         $channels_instagram: String
         $channels_twitter: String
+        $imageChannels_blog: String
+        $imageChannels_facebook: String
+        $imageChannels_instagram: String
+        $imageChannels_twitter: String
         $notes: String
         $contentFocus: String
       ) {
@@ -52,6 +56,12 @@ export async function POST(request: NextRequest) {
               facebook: $channels_facebook
               instagram: $channels_instagram
               twitter: $channels_twitter
+            }
+            imageChannels: {
+              blog: $imageChannels_blog
+              facebook: $imageChannels_facebook
+              instagram: $imageChannels_instagram
+              twitter: $imageChannels_twitter
             }
             notes: $notes
             contentFocus: $contentFocus

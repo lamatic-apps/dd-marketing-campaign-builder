@@ -26,6 +26,10 @@ export async function generateCampaign(params: {
     channels_facebook: string
     channels_instagram: string
     channels_twitter: string
+    imageChannels_blog: string
+    imageChannels_facebook: string
+    imageChannels_instagram: string
+    imageChannels_twitter: string
     notes?: string
     contentFocus?: string
 }): Promise<LamaticResponse<any>> {
