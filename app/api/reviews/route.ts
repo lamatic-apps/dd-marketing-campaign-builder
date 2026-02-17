@@ -82,8 +82,10 @@ export async function POST(request: NextRequest) {
         });
 
         // 4. Trigger email notification for each recipient
+        const emailResults: { email: string; success: boolean; error?: string }[] = [];
         for (const recipient of recipients) {
-            await sendNotificationEmail({
+            console.log(`[Reviews API] Sending notification to ${recipient.email}...`);
+            const result = await sendNotificationEmail({
                 notificationType: 'review_request',
                 campaignTitle: campaignTitle || 'Untitled Campaign',
                 campaignUrl,
@@ -92,9 +94,12 @@ export async function POST(request: NextRequest) {
                 senderName: senderName || 'A team member',
                 senderEmail: senderEmail || '',
             });
+            emailResults.push({ email: recipient.email, ...result });
+            console.log(`[Reviews API] Notification to ${recipient.email}:`, result);
         }
 
-        return NextResponse.json({ reviews, success: true });
+        const allEmailsSent = emailResults.every(r => r.success);
+        return NextResponse.json({ reviews, success: true, emailsSent: allEmailsSent, emailResults });
     } catch (error) {
         console.error('Error in POST /api/reviews:', error);
         return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
