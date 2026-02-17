@@ -74,9 +74,11 @@ export async function POST(request: NextRequest) {
         });
 
         // 4. Send approval notification emails
+        const emailResults: { email: string; success: boolean; error?: string }[] = [];
         if (recipients && recipients.length > 0) {
             for (const recipient of recipients) {
-                await sendNotificationEmail({
+                console.log(`[Approve API] Sending notification to ${recipient.email}...`);
+                const result = await sendNotificationEmail({
                     notificationType: 'approval',
                     campaignTitle: campaignTitle || 'Untitled Campaign',
                     campaignUrl,
@@ -85,10 +87,19 @@ export async function POST(request: NextRequest) {
                     senderName: senderName || 'A team member',
                     senderEmail: senderEmail || '',
                 });
+                emailResults.push({ email: recipient.email, ...result });
+                console.log(`[Approve API] Notification to ${recipient.email}:`, result);
             }
+        } else {
+            console.warn('[Approve API] No recipients provided - skipping email notifications');
         }
 
-        return NextResponse.json({ success: true });
+        const allEmailsSent = emailResults.length === 0 || emailResults.every(r => r.success);
+        return NextResponse.json({
+            success: true,
+            emailsSent: allEmailsSent,
+            emailResults,
+        });
     } catch (error) {
         console.error('Error in POST /api/approve:', error);
         return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

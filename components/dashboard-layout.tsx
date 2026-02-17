@@ -37,12 +37,6 @@ const navItems = [
     icon: BarChart3,
     active: true,
   },
-  {
-    label: "Settings",
-    href: "#",
-    icon: Settings,
-    active: false,
-  },
 ]
 
 export function DashboardLayout({ children }: { children: React.ReactNode }) {

@@ -29,7 +29,9 @@ import {
   Tag,
   ChevronDown,
   ChevronRight,
+  ImageIcon,
 } from "lucide-react"
+import { Switch } from "@/components/ui/switch"
 import { createBrowserClient } from "@supabase/ssr"
 import { cn } from "@/lib/utils"
 import { type Campaign, type CampaignStatus, type Channel, getActiveChannels, statusDisplayMap } from "@/lib/campaign-data"
@@ -73,6 +75,12 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
   const [editOpen, setEditOpen] = useState(false)
   const [editTitle, setEditTitle] = useState("")
   const [editChannels, setEditChannels] = useState<Channel[]>([])
+  const [editImageChannels, setEditImageChannels] = useState<Record<string, boolean>>({
+    blog: false,
+    facebook: false,
+    instagram: false,
+    twitter: false,
+  })
   const [editNotes, setEditNotes] = useState("")
   const [editProducts, setEditProducts] = useState<SelectedItem[]>([])
 
@@ -123,6 +131,8 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
     { id: "instagram", label: "Instagram", icon: Instagram },
     { id: "twitter", label: "Twitter/X", icon: Twitter },
   ]
+
+  const imageEligibleChannels: Channel[] = ["blog", "facebook", "instagram", "twitter"]
 
   // Sync from API campaign to local state
   useEffect(() => {
@@ -273,13 +283,25 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
         throw new Error('Failed to send review request')
       }
 
+      const data = await res.json()
+
       setLocalCampaign(prev => prev ? { ...prev, status: "PENDING_REVIEW" as any } : null)
       setReviewOpen(false)
       const names = selectedReviewRecipients.map(r => r.name || r.email).join(', ')
-      toast({
-        title: "Sent for review!",
-        description: `Review request sent to ${names}.`,
-      })
+
+      if (data.emailsSent === false) {
+        console.error('Email notification failures:', data.emailResults)
+        toast({
+          title: "Sent for review",
+          description: `Review created but email notifications to ${names} failed. Check server logs.`,
+          variant: "destructive",
+        })
+      } else {
+        toast({
+          title: "Sent for review!",
+          description: `Review request sent to ${names}.`,
+        })
+      }
       refetch()
     } catch (err) {
       console.error('Failed to send review:', err)
@@ -349,12 +371,28 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
         throw new Error('Failed to approve campaign')
       }
 
+      const data = await res.json()
+
       setLocalCampaign(prev => prev ? { ...prev, status: "APPROVED" as any } : null)
       setApproveOpen(false)
-      toast({
-        title: "Campaign approved!",
-        description: "Campaign has been approved and notifications sent.",
-      })
+
+      if (data.emailsSent === false) {
+        const failedEmails = (data.emailResults || [])
+          .filter((r: any) => !r.success)
+          .map((r: any) => `${r.email}: ${r.error || 'unknown error'}`)
+          .join('\n')
+        console.error('Email notification failures:', failedEmails)
+        toast({
+          title: "Campaign approved",
+          description: `Campaign approved but email notifications failed. Check server logs for details.`,
+          variant: "destructive",
+        })
+      } else {
+        toast({
+          title: "Campaign approved!",
+          description: "Campaign has been approved and notifications sent.",
+        })
+      }
       refetch()
     } catch (err) {
       console.error('Failed to approve:', err)
@@ -422,6 +460,12 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
     if (!localCampaign) return
     setEditTitle(localCampaign.title)
     setEditChannels(getActiveChannels(localCampaign.channels || {}))
+    setEditImageChannels({
+      blog: localCampaign.imageChannels?.blog || false,
+      facebook: localCampaign.imageChannels?.facebook || false,
+      instagram: localCampaign.imageChannels?.instagram || false,
+      twitter: localCampaign.imageChannels?.twitter || false,
+    })
     setEditNotes(localCampaign.notes || "")
 
     // Convert products to SelectedItem format
@@ -443,9 +487,16 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
     const channelsRecord: Record<string, boolean> = {}
     editChannels.forEach(c => channelsRecord[c] = true)
 
+    // Clean image channels: turn off any that are no longer in selected channels
+    const cleanedImageChannels: Record<string, boolean> = {}
+    for (const ch of imageEligibleChannels) {
+      cleanedImageChannels[ch] = editChannels.includes(ch) && (editImageChannels[ch] || false)
+    }
+
     await updateCampaignAPI({
       title: editTitle.trim(),
       channels: channelsRecord,
+      imageChannels: cleanedImageChannels,
       notes: editNotes || undefined,
       products: [
         ...editProducts.filter(p => p.type === 'product').map(p => ({
@@ -474,11 +525,17 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
   }
 
   const toggleEditChannel = (channelId: Channel) => {
-    setEditChannels(prev =>
-      prev.includes(channelId)
-        ? prev.filter(id => id !== channelId)
-        : [...prev, channelId]
-    )
+    setEditChannels(prev => {
+      const isRemoving = prev.includes(channelId)
+      if (isRemoving) {
+        setEditImageChannels(ic => ({ ...ic, [channelId]: false }))
+      }
+      return isRemoving ? prev.filter(id => id !== channelId) : [...prev, channelId]
+    })
+  }
+
+  const toggleEditImageChannel = (channelId: string) => {
+    setEditImageChannels(prev => ({ ...prev, [channelId]: !prev[channelId] }))
   }
 
   if (loading) {
@@ -504,9 +561,9 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
   const activeChannels = getActiveChannels(localCampaign.channels || {})
 
   const getChannelStatus = (channel: Channel) => {
-    if (localCampaign.status === "DRAFT") return "not_started"
-    if (localCampaign.status === "PENDING_REVIEW" || isGenerating) return "generating"
+    if (isGenerating) return "generating"
     if (localCampaign.docUrl) return "ready"
+    if (localCampaign.status === "DRAFT") return "not_started"
     return "not_started"
   }
 
@@ -535,7 +592,7 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
                     : "No date scheduled"}
                 </span>
                 <Badge variant="secondary" className={cn("text-xs", statusConfig.className)}>
-                  {(localCampaign.status === "PENDING_REVIEW" || isGenerating) && (
+                  {isGenerating && (
                     <Loader2 className="w-3 h-3 mr-1 animate-spin" />
                   )}
                   {statusConfig.label}
@@ -807,11 +864,13 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
 
             <h2 className="text-lg font-medium mb-2">Campaign Channels</h2>
             <p className="text-sm text-muted-foreground mb-4">
-              {localCampaign.status === "DRAFT"
-                ? "Click 'Generate Content' to create assets for all selected channels."
-                : localCampaign.status === "PENDING_REVIEW" || isGenerating
-                  ? "AI is generating content for your channels... This may take 60-90 seconds."
-                  : "Content has been generated and saved to Google Docs."}
+              {isGenerating
+                ? "AI is generating content for your channels... This may take 60-90 seconds."
+                : localCampaign.status === "DRAFT" && !localCampaign.docUrl
+                  ? "Click 'Generate Content' to create assets for all selected channels."
+                  : localCampaign.docUrl
+                    ? "Content has been generated and saved to Google Docs."
+                    : ""}
             </p>
 
             <div className="grid gap-3">
@@ -819,6 +878,7 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
                 const config = channelConfig[channel]
                 const Icon = config.icon
                 const status = getChannelStatus(channel)
+                const hasImageGen = imageEligibleChannels.includes(channel) && localCampaign.imageChannels?.[channel]
 
                 return (
                   <Card key={channel} className="overflow-hidden">
@@ -829,7 +889,15 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
                       <div className="flex-1 px-4 py-3">
                         <div className="flex items-center justify-between">
                           <div className="min-w-0">
-                            <h3 className="font-medium text-sm">{config.label}</h3>
+                            <div className="flex items-center gap-2">
+                              <h3 className="font-medium text-sm">{config.label}</h3>
+                              {hasImageGen && (
+                                <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5 bg-violet-50 text-violet-700 border-violet-200">
+                                  <ImageIcon className="w-3 h-3 mr-1" />
+                                  Image
+                                </Badge>
+                              )}
+                            </div>
                             {status === "generating" && (
                               <p className="text-xs text-amber-600 mt-0.5 flex items-center gap-1">
                                 <Loader2 className="w-3 h-3 animate-spin" />
@@ -877,7 +945,7 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
 
       {/* Edit Campaign Dialog */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent className="sm:max-w-[450px]">
+        <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Pencil className="w-5 h-5" />
@@ -921,6 +989,47 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
                 })}
               </div>
             </div>
+
+            {/* Image Generation Toggles */}
+            {editChannels.some(ch => imageEligibleChannels.includes(ch)) && (
+              <div className="space-y-3">
+                <Label className="text-sm font-medium flex items-center gap-2">
+                  <ImageIcon className="w-4 h-4 text-muted-foreground" />
+                  Generate Images
+                </Label>
+                <p className="text-xs text-muted-foreground -mt-1">
+                  AI-generated images for selected channels
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  {imageEligibleChannels
+                    .filter(ch => editChannels.includes(ch))
+                    .map((chId) => {
+                      const chConfig = channelConfig[chId]
+                      const ChIcon = chConfig.icon
+                      return (
+                        <label
+                          key={chId}
+                          className={cn(
+                            "flex items-center justify-between gap-2 p-2.5 rounded-lg border cursor-pointer transition-all",
+                            editImageChannels[chId]
+                              ? "border-primary/50 bg-primary/5"
+                              : "border-border hover:border-muted-foreground/30"
+                          )}
+                        >
+                          <div className="flex items-center gap-2">
+                            <ChIcon className="w-3.5 h-3.5 text-muted-foreground" />
+                            <span className="text-sm">{chConfig.label}</span>
+                          </div>
+                          <Switch
+                            checked={editImageChannels[chId] || false}
+                            onCheckedChange={() => toggleEditImageChannel(chId)}
+                          />
+                        </label>
+                      )
+                    })}
+                </div>
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label>Featured Products</Label>
@@ -1034,7 +1143,7 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
             </Button>
             <Button
               onClick={handleApprove}
-              disabled={isSendingApproval}
+              disabled={selectedApproveRecipients.length === 0 || isSendingApproval}
               className="bg-green-600 hover:bg-green-700"
             >
               {isSendingApproval ? (
