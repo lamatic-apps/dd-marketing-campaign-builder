@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Switch } from "@/components/ui/switch"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Calendar } from "@/components/ui/calendar"
 import { Slider } from "@/components/ui/slider"
@@ -21,6 +22,7 @@ import {
   Instagram,
   Twitter,
   Sparkles,
+  ImageIcon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { format } from "date-fns"
@@ -31,6 +33,13 @@ const channels = [
   { id: "blog", label: "Blog Post", sublabel: "(800-1200 words)", icon: FileText },
   { id: "email", label: "Email Campaign", icon: Mail },
   { id: "sms", label: "SMS", sublabel: "(160 chars)", icon: MessageSquare },
+  { id: "facebook", label: "Facebook", icon: Facebook },
+  { id: "instagram", label: "Instagram", icon: Instagram },
+  { id: "twitter", label: "Twitter/X", icon: Twitter },
+]
+
+const imageEligibleChannels = [
+  { id: "blog", label: "Blog", icon: FileText },
   { id: "facebook", label: "Facebook", icon: Facebook },
   { id: "instagram", label: "Instagram", icon: Instagram },
   { id: "twitter", label: "Twitter/X", icon: Twitter },
@@ -49,6 +58,12 @@ export function NewCampaignModal({ open, onOpenChange, selectedDate, onCampaignC
   const [date, setDate] = useState<Date | undefined>(selectedDate || undefined)
   const [selectedProducts, setSelectedProducts] = useState<SelectedItem[]>([])
   const [selectedChannels, setSelectedChannels] = useState<string[]>([])
+  const [imageChannels, setImageChannels] = useState<Record<string, boolean>>({
+    blog: false,
+    facebook: false,
+    instagram: false,
+    twitter: false,
+  })
   const [notes, setNotes] = useState("")
   const [contentFocus, setContentFocus] = useState(3) // Default: balanced (1=educational, 5=product-focused)
   const [dateOpen, setDateOpen] = useState(false)
@@ -70,10 +85,24 @@ export function NewCampaignModal({ open, onOpenChange, selectedDate, onCampaignC
   }
 
   const toggleChannel = (channelId: string) => {
-    setSelectedChannels((prev) =>
-      prev.includes(channelId) ? prev.filter((id) => id !== channelId) : [...prev, channelId]
-    )
+    setSelectedChannels((prev) => {
+      const isRemoving = prev.includes(channelId)
+      if (isRemoving) {
+        // Turn off image generation for this channel when deselected
+        setImageChannels((ic) => ({ ...ic, [channelId]: false }))
+      }
+      return isRemoving ? prev.filter((id) => id !== channelId) : [...prev, channelId]
+    })
   }
+
+  const toggleImageChannel = (channelId: string) => {
+    setImageChannels((prev) => ({ ...prev, [channelId]: !prev[channelId] }))
+  }
+
+  // Which image-eligible channels are currently selected?
+  const activeImageEligible = imageEligibleChannels.filter((c) =>
+    selectedChannels.includes(c.id)
+  )
 
   const handleSubmit = async () => {
     if (!topic.trim()) {
@@ -122,6 +151,7 @@ export function NewCampaignModal({ open, onOpenChange, selectedDate, onCampaignC
           ],
           contentFocus,
           notes: notes || undefined,
+          imageChannels,
           userEmail: localStorage.getItem('user-email') || 'anonymous@diversdirect.com',
         }),
       })
@@ -149,6 +179,7 @@ export function NewCampaignModal({ open, onOpenChange, selectedDate, onCampaignC
       setTopic("")
       setSelectedProducts([])
       setSelectedChannels([])
+      setImageChannels({ blog: false, facebook: false, instagram: false, twitter: false })
       setNotes("")
       setContentFocus(3)
     } catch (error: any) {
@@ -276,6 +307,44 @@ export function NewCampaignModal({ open, onOpenChange, selectedDate, onCampaignC
               })}
             </div>
           </div>
+
+          {/* Image Generation Toggles */}
+          {activeImageEligible.length > 0 && (
+            <div className="space-y-3">
+              <Label className="text-sm font-medium flex items-center gap-2">
+                <ImageIcon className="w-4 h-4 text-muted-foreground" />
+                Generate Images
+              </Label>
+              <p className="text-xs text-muted-foreground -mt-1">
+                AI-generated images for selected channels
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                {activeImageEligible.map((channel) => {
+                  const Icon = channel.icon
+                  return (
+                    <label
+                      key={channel.id}
+                      className={cn(
+                        "flex items-center justify-between gap-2 p-2.5 rounded-lg border cursor-pointer transition-all",
+                        imageChannels[channel.id]
+                          ? "border-primary/50 bg-primary/5"
+                          : "border-border hover:border-muted-foreground/30"
+                      )}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Icon className="w-3.5 h-3.5 text-muted-foreground" />
+                        <span className="text-sm">{channel.label}</span>
+                      </div>
+                      <Switch
+                        checked={imageChannels[channel.id]}
+                        onCheckedChange={() => toggleImageChannel(channel.id)}
+                      />
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Content Focus Slider */}
           <div className="space-y-3">

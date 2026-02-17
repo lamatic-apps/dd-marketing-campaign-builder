@@ -30,13 +30,20 @@ import {
   ChevronDown,
   ChevronRight,
 } from "lucide-react"
+import { createBrowserClient } from "@supabase/ssr"
 import { cn } from "@/lib/utils"
 import { type Campaign, type CampaignStatus, type Channel, getActiveChannels, statusDisplayMap } from "@/lib/campaign-data"
 import { generateCampaign } from "@/lib/lamatic-api"
 import { format } from "date-fns"
 import { useToast } from "@/hooks/use-toast"
 import { ProductSelector, type SelectedItem } from "@/components/product-selector"
+import { RecipientSelector, type UserOption, type SelectedRecipient } from "@/components/recipient-selector"
 import { useCampaign } from "@/hooks/use-campaigns"
+
+const supabase = createBrowserClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)
 
 function getStatusConfig(status: CampaignStatus) {
   return statusDisplayMap[status] || { label: status || "Unknown", className: "bg-muted text-muted-foreground" }
@@ -72,6 +79,38 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
   // Delete confirmation state
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+
+  // Review modal state
+  const [reviewOpen, setReviewOpen] = useState(false)
+  const [reviewUsers, setReviewUsers] = useState<UserOption[]>([])
+  const [selectedReviewRecipients, setSelectedReviewRecipients] = useState<SelectedRecipient[]>([])
+  const [isSendingReview, setIsSendingReview] = useState(false)
+  const [loadingUsers, setLoadingUsers] = useState(false)
+
+  // Approve modal state
+  const [approveOpen, setApproveOpen] = useState(false)
+  const [selectedApproveRecipients, setSelectedApproveRecipients] = useState<SelectedRecipient[]>([])
+  const [isSendingApproval, setIsSendingApproval] = useState(false)
+  const [loadingApproveUsers, setLoadingApproveUsers] = useState(false)
+
+  // Completed state
+  const [isMarkingCompleted, setIsMarkingCompleted] = useState(false)
+
+  // Current logged-in user
+  const [currentUser, setCurrentUser] = useState<{ name: string; email: string } | null>(null)
+
+  useEffect(() => {
+    async function fetchCurrentUser() {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        setCurrentUser({
+          name: user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'Unknown',
+          email: user.email || '',
+        })
+      }
+    }
+    fetchCurrentUser()
+  }, [])
 
   // Term sale expand state for detail view
   const [expandedDetailTermSales, setExpandedDetailTermSales] = useState<Set<string>>(new Set())
@@ -131,6 +170,8 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
       const productSkus = localCampaign.products?.map((p: any) => p.sku) || []
       const activeChannels = getActiveChannels(localCampaign.channels || {})
 
+      const imgChannels = localCampaign.imageChannels || {}
+
       const data = await generateCampaign({
         topic: localCampaign.title,
         bundleId: "",
@@ -141,6 +182,10 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
         channels_facebook: activeChannels.includes("facebook") ? "true" : "false",
         channels_instagram: activeChannels.includes("instagram") ? "true" : "false",
         channels_twitter: activeChannels.includes("twitter") ? "true" : "false",
+        imageChannels_blog: imgChannels.blog ? "true" : "false",
+        imageChannels_facebook: imgChannels.facebook ? "true" : "false",
+        imageChannels_instagram: imgChannels.instagram ? "true" : "false",
+        imageChannels_twitter: imgChannels.twitter ? "true" : "false",
         notes: localCampaign.notes || "",
         contentFocus: String(localCampaign.contentFocus || 3),
       })
@@ -176,12 +221,171 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
     }
   }
 
+  const fetchUsers = async (): Promise<UserOption[]> => {
+    try {
+      const res = await fetch('/api/users')
+      const data = await res.json()
+      return data.users || []
+    } catch (err) {
+      console.error('Failed to fetch users:', err)
+      toast({
+        title: "Failed to load users",
+        description: "Could not fetch the user list. Please try again.",
+        variant: "destructive",
+      })
+      return []
+    }
+  }
+
+  const handleOpenReviewModal = async () => {
+    setReviewOpen(true)
+    setSelectedReviewRecipients([])
+    setLoadingUsers(true)
+    const users = await fetchUsers()
+    setReviewUsers(users)
+    setLoadingUsers(false)
+  }
+
   const handleSendToReview = async () => {
-    await updateCampaignAPI({ status: "PENDING_REVIEW" })
-    toast({
-      title: "Sent to review!",
-      description: "Campaign has been sent to the team for review.",
-    })
+    if (selectedReviewRecipients.length === 0 || !localCampaign) return
+
+    setIsSendingReview(true)
+    try {
+      const senderInfo = currentUser || { name: "A team member", email: "unknown" }
+
+      const res = await fetch('/api/reviews', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          campaignId: localCampaign.id,
+          campaignTitle: localCampaign.title,
+          recipients: selectedReviewRecipients.map(r => ({
+            id: r.id,
+            email: r.email,
+            name: r.name,
+          })),
+          senderName: senderInfo.name || senderInfo.email,
+          senderEmail: senderInfo.email || '',
+        }),
+      })
+
+      if (!res.ok) {
+        throw new Error('Failed to send review request')
+      }
+
+      setLocalCampaign(prev => prev ? { ...prev, status: "PENDING_REVIEW" as any } : null)
+      setReviewOpen(false)
+      const names = selectedReviewRecipients.map(r => r.name || r.email).join(', ')
+      toast({
+        title: "Sent for review!",
+        description: `Review request sent to ${names}.`,
+      })
+      refetch()
+    } catch (err) {
+      console.error('Failed to send review:', err)
+      toast({
+        title: "Failed to send review",
+        description: "Could not send the review request. Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSendingReview(false)
+    }
+  }
+
+  const handleOpenApproveModal = async () => {
+    setApproveOpen(true)
+    setSelectedApproveRecipients([])
+    setLoadingApproveUsers(true)
+
+    // Fetch users and reviews in parallel
+    const [users, reviewsRes] = await Promise.all([
+      fetchUsers(),
+      fetch(`/api/reviews?campaignId=${campaignId}`).then(r => r.json()).catch(() => ({ reviews: [] })),
+    ])
+
+    setReviewUsers(users)
+    setLoadingApproveUsers(false)
+
+    // Pre-select the person who originally sent it for review
+    const reviews = reviewsRes.reviews || []
+    if (reviews.length > 0) {
+      const senderEmail = reviews[0].requestedByEmail
+      if (senderEmail && senderEmail !== 'unknown') {
+        const matchingUser = users.find((u: UserOption) => u.email.toLowerCase() === senderEmail.toLowerCase())
+        if (matchingUser) {
+          setSelectedApproveRecipients([{ id: matchingUser.id, email: matchingUser.email, name: matchingUser.name }])
+        } else {
+          setSelectedApproveRecipients([{ email: senderEmail, name: senderEmail.split('@')[0], isCustom: true }])
+        }
+      }
+    }
+  }
+
+  const handleApprove = async () => {
+    if (!localCampaign) return
+
+    setIsSendingApproval(true)
+    try {
+      const senderInfo = currentUser || { name: "A team member", email: "unknown" }
+
+      const res = await fetch('/api/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          campaignId: localCampaign.id,
+          campaignTitle: localCampaign.title,
+          recipients: selectedApproveRecipients.map(r => ({
+            id: r.id,
+            email: r.email,
+            name: r.name,
+          })),
+          senderName: senderInfo.name || senderInfo.email,
+          senderEmail: senderInfo.email || '',
+        }),
+      })
+
+      if (!res.ok) {
+        throw new Error('Failed to approve campaign')
+      }
+
+      setLocalCampaign(prev => prev ? { ...prev, status: "APPROVED" as any } : null)
+      setApproveOpen(false)
+      toast({
+        title: "Campaign approved!",
+        description: "Campaign has been approved and notifications sent.",
+      })
+      refetch()
+    } catch (err) {
+      console.error('Failed to approve:', err)
+      toast({
+        title: "Approval failed",
+        description: "Could not approve the campaign. Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSendingApproval(false)
+    }
+  }
+
+  const handleMarkCompleted = async () => {
+    if (!localCampaign) return
+    setIsMarkingCompleted(true)
+    try {
+      await updateCampaignAPI({ status: "COMPLETED" })
+      toast({
+        title: "Campaign completed!",
+        description: "Campaign has been marked as completed.",
+      })
+    } catch (err) {
+      toast({
+        title: "Failed to update",
+        description: "Could not mark campaign as completed.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsMarkingCompleted(false)
+    }
   }
 
   const handleDelete = async () => {
@@ -212,14 +416,6 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
       setIsDeleting(false)
       setDeleteOpen(false)
     }
-  }
-
-  const handleApprove = async () => {
-    await updateCampaignAPI({ status: "APPROVED" })
-    toast({
-      title: "Campaign approved!",
-      description: "Campaign is now approved and ready to publish.",
-    })
   }
 
   const handleOpenEdit = () => {
@@ -374,21 +570,40 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
               </>
             )}
             {localCampaign.status === "SCHEDULED" && (
-              <Button onClick={handleSendToReview} className="bg-primary">
+              <Button onClick={handleOpenReviewModal} className="bg-primary">
                 <Send className="w-4 h-4 mr-2" />
                 Send to Review
               </Button>
             )}
             {localCampaign.status === "PENDING_REVIEW" && (
-              <Button onClick={handleApprove} className="bg-green-600 hover:bg-green-700">
+              <Button onClick={handleOpenApproveModal} className="bg-green-600 hover:bg-green-700">
                 <Check className="w-4 h-4 mr-2" />
                 Approve
               </Button>
             )}
             {localCampaign.status === "APPROVED" && (
+              <Button
+                onClick={handleMarkCompleted}
+                disabled={isMarkingCompleted}
+                className="bg-green-600 hover:bg-green-700"
+              >
+                {isMarkingCompleted ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Completing...
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-4 h-4 mr-2" />
+                    Mark as Completed
+                  </>
+                )}
+              </Button>
+            )}
+            {localCampaign.status === "COMPLETED" && (
               <Badge className="bg-green-100 text-green-800 px-4 py-2">
                 <Check className="w-4 h-4 mr-2" />
-                Approved
+                Completed
               </Badge>
             )}
             {/* Delete button - always visible */}
@@ -738,6 +953,101 @@ export function CampaignDetail({ campaignId }: CampaignDetailProps) {
               disabled={editChannels.length === 0}
             >
               Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Send for Review Dialog */}
+      <Dialog open={reviewOpen} onOpenChange={setReviewOpen}>
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Send className="w-5 h-5 text-primary" />
+              Send for Review
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="py-4 space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Select who should review <strong>"{localCampaign.title}"</strong>
+            </p>
+
+            <RecipientSelector
+              users={reviewUsers}
+              loading={loadingUsers}
+              selectedRecipients={selectedReviewRecipients}
+              onSelectionChange={setSelectedReviewRecipients}
+            />
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReviewOpen(false)} disabled={isSendingReview}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSendToReview}
+              disabled={selectedReviewRecipients.length === 0 || isSendingReview}
+            >
+              {isSendingReview ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Sending...
+                </>
+              ) : (
+                <>
+                  <Send className="w-4 h-4 mr-2" />
+                  Send for Review ({selectedReviewRecipients.length})
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Approve Campaign Dialog */}
+      <Dialog open={approveOpen} onOpenChange={setApproveOpen}>
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-green-700">
+              <Check className="w-5 h-5" />
+              Approve Campaign
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="py-4 space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Approve <strong>"{localCampaign.title}"</strong> and notify the team.
+            </p>
+
+            <RecipientSelector
+              users={reviewUsers}
+              loading={loadingApproveUsers}
+              selectedRecipients={selectedApproveRecipients}
+              onSelectionChange={setSelectedApproveRecipients}
+            />
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setApproveOpen(false)} disabled={isSendingApproval}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleApprove}
+              disabled={isSendingApproval}
+              className="bg-green-600 hover:bg-green-700"
+            >
+              {isSendingApproval ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Approving...
+                </>
+              ) : (
+                <>
+                  <Check className="w-4 h-4 mr-2" />
+                  Approve & Notify{selectedApproveRecipients.length > 0 ? ` (${selectedApproveRecipients.length})` : ''}
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
