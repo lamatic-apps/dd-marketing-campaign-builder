@@ -5,7 +5,13 @@ import { createClient } from "@supabase/supabase-js"
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 
+// Anon client — for client-side auth checks only
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+
+// Service role client — bypasses RLS, for server-side API routes only
+// NEVER expose this on the client side
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey
+export const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey)
 
 // Type definitions matching our database schema
 export type Role = 'ADMIN' | 'EDITOR' | 'VIEWER';
