@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase, ActivityAction } from '@/lib/supabase';
+import { supabaseAdmin as supabase, ActivityAction } from '@/lib/supabase';
 
 interface RouteParams {
     params: Promise<{ id: string }>;
