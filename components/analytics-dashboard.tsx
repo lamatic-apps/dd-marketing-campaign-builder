@@ -14,7 +14,8 @@ import {
     AlertCircle,
     CalendarIcon,
     X,
-    LayoutDashboard
+    LayoutDashboard,
+    Quote
 } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -87,6 +88,23 @@ interface KPIData {
             clicks: number
         }>
     }
+    attentive: {
+        connected: boolean
+        summary: {
+            totalSends: number
+            totalSpend: string
+            totalSMSCost: string
+            totalCarrierFees: string
+            campaignCount: number
+        }
+        campaigns: Array<{
+            id: string
+            name: string
+            sendDate: string
+            sends: number
+            spend: string
+        }>
+    }
     all?: {
         summary: {
             totalSpend: string | number
@@ -100,6 +118,8 @@ interface KPIData {
             emailOpens: number
             emailOpenRate: string | number
             emailClickRate: string | number
+            smsSends?: number
+            smsSpend?: string | number
         }
     }
     fetchedAt: string
@@ -108,7 +128,7 @@ interface KPIData {
 interface DetailData {
     id: string
     name: string
-    platform: 'mailchimp' | 'facebook' | 'googleads'
+    platform: 'mailchimp' | 'facebook' | 'googleads' | 'attentive'
     metrics: any
     timeseries?: any[]
 }
@@ -144,7 +164,7 @@ function CampaignDetailDialog({
     open: boolean
     onOpenChange: (open: boolean) => void
     campaignId: string | null
-    platform: 'mailchimp' | 'facebook' | 'googleads'
+    platform: 'mailchimp' | 'facebook' | 'googleads' | 'attentive'
     startDate?: Date
     endDate?: Date
 }) {
@@ -243,6 +263,44 @@ function CampaignDetailDialog({
             )
         }
 
+        // Attentive Metrics
+        if (platform === 'attentive') {
+            return (
+                <div className="space-y-4">
+                    {/* Message Preview */}
+                    {data.metrics.messageCopy && (
+                        <div className="p-4 bg-muted/40 rounded-xl border border-border/50 text-sm italic text-muted-foreground relative">
+                            <Quote className="h-4 w-4 absolute top-2 left-2 text-primary/20" />
+                            <p className="pl-6 text-foreground/90">{data.metrics.messageCopy}</p>
+                        </div>
+                    )}
+                    
+                    {/* Spend & Leads - stacked */}
+                    <div className="grid grid-cols-2 gap-3">
+                        <div className="text-center p-4 bg-gradient-to-br from-indigo-500/10 to-blue-500/5 rounded-xl border border-indigo-200/50">
+                            <p className="text-2xl font-bold text-indigo-600">{Number(data.metrics.sends || 0).toLocaleString()}</p>
+                            <p className="text-sm text-muted-foreground mt-1">Total Sends</p>
+                        </div>
+                        <div className="text-center p-4 bg-gradient-to-br from-red-500/10 to-orange-500/5 rounded-xl border border-red-200/50">
+                            <p className="text-2xl font-bold text-red-600">${parseFloat(data.metrics.spend || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                            <p className="text-sm text-muted-foreground mt-1">SMS Spend</p>
+                        </div>
+                    </div>
+                    {/* Cost Breakdown - 2 per row */}
+                    <div className="grid grid-cols-2 gap-3">
+                        <MetricBox label="SMS Cost" value={`$${parseFloat(data.metrics.smsSendCost || 0).toFixed(2)}`} color="text-orange-600" />
+                        <MetricBox label="Carrier Fees" value={`$${parseFloat(data.metrics.carrierFees || 0).toFixed(2)}`} color="text-red-500" />
+                    </div>
+                    {/* Technical details */}
+                    <div className="grid grid-cols-3 gap-3">
+                        <MetricBox label="Msg Segments" value={Number(data.metrics.messageSegments || 0).toLocaleString()} />
+                        <MetricBox label="SMS Segments" value={Number(data.metrics.smsSegments || 0).toLocaleString()} />
+                        <MetricBox label="Characters" value={Number(data.metrics.characters || 0).toLocaleString()} />
+                    </div>
+                </div>
+            )
+        }
+
         // Google Ads Metrics
         return (
             <div className="space-y-4">
@@ -280,8 +338,8 @@ function CampaignDetailDialog({
                             {data?.name || 'Loading...'}
                         </DialogTitle>
                         <DialogDescription className="flex items-center gap-2 text-sm text-muted-foreground mt-1">
-                            {platform === 'mailchimp' ? <Mail className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                            {platform === 'mailchimp' ? 'Email Campaign Report' : platform === 'facebook' ? 'Facebook Ad Insights' : 'Google Ads Campaign'}
+                            {platform === 'mailchimp' ? <Mail className="w-3.5 h-3.5" /> : platform === 'attentive' ? <MessageSquare className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                            {platform === 'mailchimp' ? 'Email Campaign Report' : platform === 'facebook' ? 'Facebook Ad Insights' : platform === 'attentive' ? 'SMS Campaign Details' : 'Google Ads Campaign'}
                         </DialogDescription>
                     </DialogHeader>
                 </div>
@@ -339,6 +397,31 @@ function CampaignDetailDialog({
                                                         ))}
                                                     </tbody>
                                                 </>
+                                            ) : platform === 'attentive' ? (
+                                                <>
+                                                    <thead className="bg-muted/50 text-xs text-muted-foreground font-medium uppercase">
+                                                        <tr>
+                                                            <th className="px-4 py-3 text-left font-semibold">Date</th>
+                                                            <th className="px-4 py-3 text-right font-semibold">Sends</th>
+                                                            <th className="px-4 py-3 text-right font-semibold">Spend</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y divide-border/50">
+                                                        {data.timeseries.map((t: any, i: number) => (
+                                                            <tr key={i} className="group hover:bg-muted/30 transition-colors">
+                                                                <td className="px-4 py-2.5 font-medium text-foreground/80 whitespace-nowrap">
+                                                                    {t.date ? new Date(t.date + 'T00:00:00').toLocaleDateString([], { month: 'short', day: 'numeric' }) : '-'}
+                                                                </td>
+                                                                <td className="px-4 py-2.5 text-right font-mono text-muted-foreground group-hover:text-foreground">
+                                                                    {parseInt(t.sends || 0).toLocaleString()}
+                                                                </td>
+                                                                <td className="px-4 py-2.5 text-right font-mono text-muted-foreground group-hover:text-foreground">
+                                                                    ${parseFloat(t.spend || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </>
                                             ) : (
                                                 <>
                                                     <thead className="bg-muted/50 text-xs text-muted-foreground font-medium uppercase">
@@ -385,7 +468,7 @@ function CampaignDetailDialog({
     )
 }
 
-function CampaignList({ campaigns, type, onSelect }: { campaigns: any[], type: 'email' | 'ad', onSelect: (id: string) => void }) {
+function CampaignList({ campaigns, type, onSelect }: { campaigns: any[], type: 'email' | 'ad' | 'sms', onSelect: (id: string) => void }) {
     if (!campaigns?.length) return <div className="text-muted-foreground text-sm p-8 text-center bg-muted/20 rounded-xl border border-dashed">No recent activity</div>
 
     return (
@@ -397,7 +480,7 @@ function CampaignList({ campaigns, type, onSelect }: { campaigns: any[], type: '
                     className="group w-full flex items-center justify-between p-3 hover:bg-muted/50 rounded-lg transition-all duration-200 text-left border border-transparent hover:border-border/40"
                 >
                     <div className="flex items-center gap-3 min-w-0">
-                        <div className={`w-1.5 h-1.5 rounded-full ${type === 'email' ? 'bg-blue-500' : 'bg-purple-500'} flex-shrink-0`}></div>
+                        <div className={`w-1.5 h-1.5 rounded-full ${type === 'email' ? 'bg-blue-500' : type === 'sms' ? 'bg-indigo-500' : 'bg-purple-500'} flex-shrink-0`}></div>
                         <div className="flex flex-col min-w-0">
                             <span className="font-medium text-sm truncate group-hover:text-primary transition-colors pr-2">
                                 {c.name}
@@ -418,6 +501,15 @@ function CampaignList({ campaigns, type, onSelect }: { campaigns: any[], type: '
                                         ${c.revenue.toFixed(2)}
                                     </span>
                                 )}
+                            </>
+                        ) : type === 'sms' ? (
+                            <>
+                                <span className="text-xs font-mono text-muted-foreground bg-muted/30 px-2 py-0.5 rounded whitespace-nowrap">
+                                    {(c.sends || 0).toLocaleString()} sends
+                                </span>
+                                <span className="text-xs font-mono text-orange-600 bg-orange-500/10 px-2 py-0.5 rounded whitespace-nowrap">
+                                    ${Number(c.spend || 0).toFixed(2)}
+                                </span>
                             </>
                         ) : (
                             <>
@@ -446,7 +538,7 @@ export function AnalyticsDashboard() {
     // Detail View State
     const [detailOpen, setDetailOpen] = useState(false)
     const [selectedId, setSelectedId] = useState<string | null>(null)
-    const [selectedPlatform, setSelectedPlatform] = useState<'mailchimp' | 'facebook' | 'googleads'>('mailchimp')
+    const [selectedPlatform, setSelectedPlatform] = useState<'mailchimp' | 'facebook' | 'googleads' | 'attentive'>('mailchimp')
 
     // Date Filter State
     const [startDate, setStartDate] = useState<Date | undefined>(undefined)
@@ -454,47 +546,31 @@ export function AnalyticsDashboard() {
     const [activeTab, setActiveTab] = useState<string>("all")
     const [isFiltered, setIsFiltered] = useState(false)
 
-    const openDetail = (id: string, platform: 'mailchimp' | 'facebook' | 'googleads') => {
+    const openDetail = (id: string, platform: 'mailchimp' | 'facebook' | 'googleads' | 'attentive') => {
         setSelectedId(id)
         setSelectedPlatform(platform)
         setDetailOpen(true)
     }
 
-    // Map tab values to platform API values
-    const tabToPlatform: Record<string, string> = {
-        all: 'all',
-        email: 'mailchimp',
-        facebook: 'facebook',
-        google: 'googleads'
-    }
-
-    // Fetch a single platform's KPI data for a date range
-    const fetchPlatformData = async (platform: string, start: Date, end: Date) => {
+    // Fetch dashboard KPI data for a date range (returns all platforms from Lamatic)
+    const fetchDashboardData = async (start: Date, end: Date) => {
         const params = new URLSearchParams({
-            platform,
             startDate: format(start, 'yyyy-MM-dd'),
             endDate: format(end, 'yyyy-MM-dd')
         })
         const res = await fetch(`/api/kpi?${params.toString()}`)
-        if (!res.ok) throw new Error(`Failed to fetch ${platform} data`)
+        if (!res.ok) throw new Error('Failed to fetch dashboard data')
         return res.json()
     }
 
-    // Fetch all platforms in parallel for the given date range
-    const fetchAllPlatforms = async (start: Date, end: Date) => {
+    // Load data and update state
+    const loadData = async (start: Date, end: Date) => {
         setLoading(true)
         setError(null)
         try {
-            const [mailchimpData, facebookData, googleAdsData] = await Promise.all([
-                fetchPlatformData('mailchimp', start, end),
-                fetchPlatformData('facebook', start, end),
-                fetchPlatformData('googleads', start, end)
-            ])
-
+            const json = await fetchDashboardData(start, end)
             setData({
-                ...mailchimpData,
-                ...facebookData,
-                ...googleAdsData,
+                ...json,
                 fetchedAt: new Date().toISOString()
             })
         } catch (err) {
@@ -505,36 +581,10 @@ export function AnalyticsDashboard() {
         }
     }
 
-    // Fetch a single platform for the current date range (used by Apply Filter)
-    const fetchSinglePlatform = async (platform: string, start: Date, end: Date) => {
-        setLoading(true)
-        setError(null)
-        try {
-            const json = await fetchPlatformData(platform, start, end)
-            setData((prev: any) => ({
-                ...prev,
-                ...json,
-                fetchedAt: json.fetchedAt || new Date().toISOString()
-            }))
-            setIsFiltered(true)
-        } catch (err) {
-            console.error(err)
-            setError('Failed to load KPI data. Please try again.')
-        } finally {
-            setLoading(false)
-        }
-    }
-
     const applyDateFilter = () => {
         if (!startDate || !endDate) return
-        if (activeTab === 'all') {
-            setIsFiltered(true)
-            fetchAllPlatforms(startDate, endDate)
-        } else {
-            const platform = tabToPlatform[activeTab]
-            if (!platform) return
-            fetchSinglePlatform(platform, startDate, endDate)
-        }
+        setIsFiltered(true)
+        loadData(startDate, endDate)
     }
 
     const clearDateFilter = () => {
@@ -545,12 +595,12 @@ export function AnalyticsDashboard() {
         setStartDate(thirtyDaysAgo)
         setEndDate(now)
         setIsFiltered(false)
-        fetchAllPlatforms(thirtyDaysAgo, now)
+        loadData(thirtyDaysAgo, now)
     }
 
     const refreshData = () => {
         if (startDate && endDate) {
-            fetchAllPlatforms(startDate, endDate)
+            loadData(startDate, endDate)
         }
     }
 
@@ -561,7 +611,7 @@ export function AnalyticsDashboard() {
         thirtyDaysAgo.setDate(now.getDate() - 30)
         setStartDate(thirtyDaysAgo)
         setEndDate(now)
-        fetchAllPlatforms(thirtyDaysAgo, now)
+        loadData(thirtyDaysAgo, now)
     }, [])
 
     if (loading) {
@@ -615,6 +665,10 @@ export function AnalyticsDashboard() {
                         <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border ${data?.googleAds?.connected ? 'bg-green-500/10 text-green-700 border-green-200' : 'bg-destructive/10 text-destructive border-destructive/20'}`}>
                             <div className={`w-1.5 h-1.5 rounded-full ${data?.googleAds?.connected ? 'bg-green-600' : 'bg-destructive'}`}></div>
                             Google Ads
+                        </div>
+                        <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border ${data?.attentive?.connected ? 'bg-green-500/10 text-green-700 border-green-200' : 'bg-destructive/10 text-destructive border-destructive/20'}`}>
+                            <div className={`w-1.5 h-1.5 rounded-full ${data?.attentive?.connected ? 'bg-green-600' : 'bg-destructive'}`}></div>
+                            Attentive SMS
                         </div>
                     </div>
                     <Button variant="outline" size="sm" onClick={() => refreshData()} className="gap-2 shadow-sm hover:shadow active:scale-95 transition-all">
@@ -762,8 +816,8 @@ export function AnalyticsDashboard() {
                                     <MetricBox label="Avg. CPC" value={`$${parseFloat(allSummary.cpc || 0).toFixed(2)}`} color="text-orange-600" />
                                 </div>
 
-                                {/* Email metrics */}
-                                <div className="grid gap-8 md:grid-cols-2">
+                                {/* Email, Ad, & SMS metrics */}
+                                <div className="grid gap-6 md:grid-cols-3">
                                     <Card className="border-border/50 shadow-sm">
                                         <CardHeader className="border-b border-border/40 bg-muted/20 pb-4">
                                             <CardTitle className="text-lg font-semibold flex items-center gap-2">
@@ -791,6 +845,19 @@ export function AnalyticsDashboard() {
                                             <MetricRow label="Total Revenue" value={`$${parseFloat(allSummary.totalRevenue || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} />
                                             <MetricRow label="ROAS" value={`${parseFloat(allSummary.roas || 0).toFixed(2)}x`} />
                                             <MetricRow label="Total Impressions" value={Number(allSummary.totalImpressions || 0).toLocaleString()} />
+                                        </CardContent>
+                                    </Card>
+
+                                    <Card className="border-border/50 shadow-sm">
+                                        <CardHeader className="border-b border-border/40 bg-muted/20 pb-4">
+                                            <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                                                <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                                                SMS Performance
+                                            </CardTitle>
+                                        </CardHeader>
+                                        <CardContent className="pt-6 space-y-4">
+                                            <MetricRow label="SMS Sent" value={Number(allSummary.smsSends || 0).toLocaleString()} />
+                                            <MetricRow label="Total SMS Spend" value={`$${parseFloat(allSummary.smsSpend || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} />
                                         </CardContent>
                                     </Card>
                                 </div>
@@ -914,16 +981,86 @@ export function AnalyticsDashboard() {
                     </div>
                 </TabsContent>
 
-                {/* PLACEHOLDER TABS */}
-                <TabsContent value="sms" className="flex flex-col items-center justify-center min-h-[400px]">
-                    <div className="text-center space-y-4 max-w-md p-8 rounded-2xl bg-muted/30 border border-dashed border-border/50">
-                        <div className="mx-auto w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
-                            <MessageSquare className="h-8 w-8 text-primary/60" />
+                {/* SMS/ATTENTIVE TAB */}
+                <TabsContent value="sms" className="space-y-8">
+                    {data?.attentive?.connected ? (
+                        <>
+                            {/* Headline Stats */}
+                            <div className="grid gap-4 md:grid-cols-2">
+                                <div className="p-6 bg-gradient-to-br from-indigo-500/10 to-blue-500/5 rounded-xl border border-indigo-200/50">
+                                    <p className="text-sm text-muted-foreground mb-1">Total Sends</p>
+                                    <p className="text-3xl font-bold text-indigo-600">
+                                        {(data?.attentive.summary.totalSends || 0).toLocaleString()}
+                                    </p>
+                                    <p className="text-xs text-muted-foreground mt-2">Messages Delivered</p>
+                                </div>
+                                <div className="p-6 bg-gradient-to-br from-red-500/10 to-orange-500/5 rounded-xl border border-red-200/50">
+                                    <p className="text-sm text-muted-foreground mb-1">Total SMS Spend</p>
+                                    <p className="text-3xl font-bold text-red-600">
+                                        ${parseFloat(data?.attentive.summary.totalSpend || '0').toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </p>
+                                    <p className="text-xs text-muted-foreground mt-2">Excludes platform subscription fees</p>
+                                </div>
+                            </div>
+
+                            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                                <MetricBox label="SMS Cost" value={`$${parseFloat(data?.attentive.summary.totalSMSCost || '0').toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} color="text-orange-600" />
+                                <MetricBox label="Carrier Fees" value={`$${parseFloat(data?.attentive.summary.totalCarrierFees || '0').toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} color="text-red-500" />
+                                <MetricBox label="Campaigns Sent" value={data?.attentive.summary.campaignCount || 0} />
+                            </div>
+
+                            <div className="grid gap-8 md:grid-cols-3">
+                                <Card className="md:col-span-2 border-border/50 shadow-sm">
+                                    <CardHeader className="border-b border-border/40 bg-muted/20 pb-4">
+                                        <div className="flex items-center justify-between">
+                                            <div className="space-y-1">
+                                                <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                                                    <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                                                    SMS Campaigns
+                                                </CardTitle>
+                                                <p className="text-sm text-muted-foreground">Recent Attentive marketing messages sent</p>
+                                            </div>
+                                            <Badge variant="outline" className="bg-background">
+                                                {data?.attentive.campaigns?.length || 0} Campaigns
+                                            </Badge>
+                                        </div>
+                                    </CardHeader>
+                                    <CardContent className="pt-6">
+                                        <CampaignList
+                                            campaigns={data?.attentive.campaigns || []}
+                                            type="sms"
+                                            onSelect={(id) => openDetail(id, 'attentive')}
+                                        />
+                                    </CardContent>
+                                </Card>
+
+                                <Card className="border-border/50 shadow-sm h-fit">
+                                    <CardHeader className="border-b border-border/40 bg-muted/20 pb-4">
+                                        <CardTitle className="text-lg font-semibold">Message Distribution</CardTitle>
+                                    </CardHeader>
+                                    <CardContent className="pt-6 space-y-6 text-center">
+                                        <div className="mx-auto w-24 h-24 rounded-full border-4 border-indigo-500 flex items-center justify-center p-2 mb-2">
+                                            <div className="w-full h-full rounded-full bg-indigo-500/10 flex items-center justify-center">
+                                                <MessageSquare className="w-8 h-8 text-indigo-500" />
+                                            </div>
+                                        </div>
+                                        <p className="text-sm text-muted-foreground">Select an SMS campaign from the list to view granular tracking parameters or to export detailed CSV logs.</p>
+                                    </CardContent>
+                                </Card>
+                            </div>
+                        </>
+                    ) : (
+                        <div className="flex flex-col items-center justify-center min-h-[400px]">
+                            <div className="text-center space-y-4 max-w-md p-8 rounded-2xl bg-muted/30 border border-dashed border-border/50">
+                                <div className="mx-auto w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+                                    <MessageSquare className="h-8 w-8 text-primary/60" />
+                                </div>
+                                <h3 className="text-lg font-bold">SMS Marketing</h3>
+                                <p className="text-muted-foreground">Attentive data is not available. Check your API connection.</p>
+                                <Button variant="outline" onClick={() => refreshData()}>Retry Connection</Button>
+                            </div>
                         </div>
-                        <h3 className="text-lg font-bold">SMS Marketing</h3>
-                        <p className="text-muted-foreground">Attentive is connected but reporting data is not yet flowing. Check back soon for SMS performance.</p>
-                        <Button variant="outline">Check Connection</Button>
-                    </div>
+                    )}
                 </TabsContent>
 
                 {/* GOOGLE ADS TAB */}
